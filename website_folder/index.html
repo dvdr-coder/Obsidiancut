@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Obsidian Cut — Complete Engineering, Codebase &amp; Installation Guide</title>
+  <meta
+    name="description"
+    content="Complete architectural reference, interactive diagrams, module breakdown, REST API docs, and multi-platform installation guide for Obsidian Cut."
+  />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Fixed Top Header -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <button type="button" id="mobile-menu-btn" class="btn mobile-menu-btn" aria-label="Toggle Menu">☰</button>
+      <div class="brand-mark">OC</div>
+      <span class="brand-title">Obsidian Cut</span>
+      <span class="brand-badge">Engineering &amp; Docs Site</span>
+    </div>
+    <div class="topbar-actions">
+      <div class="search-box">
+        <span class="search-icon">⌕</span>
+        <input
+          type="search"
+          id="global-search"
+          placeholder="Search files, symbols, APIs..."
+          aria-label="Search codebase and API documentation"
+        />
+      </div>
+      <button type="button" id="theme-toggle-btn" class="btn">☀ Light Mode</button>
+      <a href="#installation" class="btn btn-primary">Quick Install</a>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- Left Sidebar Navigation -->
+    <aside class="sidebar" id="sidebar" aria-label="Documentation Navigation">
+      <div class="nav-group">
+        <div class="nav-group-label">Overview &amp; Blueprints</div>
+        <a class="nav-link active" href="#overview">Introduction <span class="nav-pill">Start</span></a>
+        <a class="nav-link" href="#architecture">System Architecture <span class="nav-pill">SVG</span></a>
+        <a class="nav-link" href="#audio-pipeline">Audio &amp; Spectrum Flow <span class="nav-pill">DSP</span></a>
+        <a class="nav-link" href="#render-dag">FFmpeg Render DAG <span class="nav-pill">C/Py</span></a>
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-group-label">Interactive Visualizers</div>
+        <a class="nav-link" href="#visual-simulators">Waveform, RTA &amp; Curves <span class="nav-pill">Live</span></a>
+        <a class="nav-link" href="#parity-matrix">JS ↔ Python Parity <span class="nav-pill">1:1</span></a>
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-group-label">Source Code Reference</div>
+        <a class="nav-link" href="#directory-tree">Repository Tree <span class="nav-pill">Files</span></a>
+        <a class="nav-link" href="#codebase">Every File Explained <span class="nav-pill">32+</span></a>
+        <a class="nav-link" href="#workflows">Studio Modes &amp; Shortcuts <span class="nav-pill">UX</span></a>
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-group-label">Setup, API &amp; Automation</div>
+        <a class="nav-link" href="#installation">Installation &amp; run.sh <span class="nav-pill">OS</span></a>
+        <a class="nav-link" href="#api">REST API Endpoints <span class="nav-pill">13</span></a>
+        <a class="nav-link" href="#cli">autoengine HJSON CLI <span class="nav-pill">Batch</span></a>
+      </div>
+    </aside>
+
+    <!-- Main Documentation Body -->
+    <main class="main-content">
+      <!-- Hero -->
+      <section id="overview" class="hero">
+        <div class="hero-eyebrow">● Complete Architecture &amp; Website Kit</div>
+        <h1>Obsidian Cut — Full Codebase, Diagrams &amp; Installation Guide</h1>
+        <p>
+          Obsidian Cut is a lightweight, high-performance multi-track NLE studio built with a
+          <strong>React 19 + 2D Canvas + Web Audio</strong> frontend, an <strong>Express + Vite</strong> gateway
+          (<code>server.ts</code>), and a zero-dependency <strong>Python + FFmpeg</strong> render engine
+          (<code>backend/engine.py</code>). Explore every module, interactive signal-flow diagram, installation
+          command, and REST API contract below.
+        </p>
+
+        <div class="hero-metrics">
+          <div class="metric-box">
+            <div class="metric-val">4 Modes</div>
+            <div class="metric-label">Auto Sync · Endless · Advanced · Quick Render</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-val">30 xfade</div>
+            <div class="metric-label">Hardware-accurate FFmpeg video transitions</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-val">1,600 Bins</div>
+            <div class="metric-label">Decoded PCM waveforms + 48-band RTA FFT</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-val">0 pip deps</div>
+            <div class="metric-label">Pure Python stdlib + FFmpeg backend</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 1. System Architecture -->
+      <section id="architecture" class="doc-section">
+        <div class="section-header">
+          <span class="section-tag">01 / System Blueprint</span>
+          <h2>End-to-End 3-Tier Architecture</h2>
+          <p>How the browser editor, Express proxy gateway, Python FFmpeg worker, disk storage, and batch CLI communicate.</p>
+        </div>
+
+        <div class="diagram-frame" id="diag-architecture"></div>
+
+        <div class="card-grid">
+          <div class="card">
+            <h3>Dual-Path Proxy Strategy</h3>
+            <p>
+              Heavy 4K/VFR videos automatically generate lightweight <code>480p</code> CFR H.264 proxies inside
+              <code>.obsidiancut_data/proxies/</code> for lag-free timeline scrubbing, while final exports always read
+              the untouched master uploads in <code>uploads/</code>.
+            </p>
+          </div>
+          <div class="card">
+            <h3>Zero-Bloat Low-Hardware Design</h3>
+            <p>
+              All audio waveforms, spectrum bars, keyframe splines, and color grades render directly on native HTML5
+              <code>&lt;canvas&gt;</code> elements with zero heavy WebGL/Electron runtime overhead.
+            </p>
+          </div>
+          <div class="card">
+            <h3>Cross-Platform Supervision</h3>
+            <p>
+              <code>server.ts</code> auto-detects <code>python3</code>, <code>python</code>, or Windows
+              <code>py -3</code>, spawns <code>backend/engine.py</code> on internal port <code>3001</code>, and
+              handles both POSIX <code>SIGINT/SIGTERM</code> and Windows <code>SIGBREAK</code>.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. Audio Signal & Spectrum Pipeline -->
+      <section id="audio-pipeline" class="doc-section">
+        <div class="section-header">
+          <span class="section-tag">02 / Audio Engineering</span>
+          <h2>Audio Waveforms, Crossfades, Normalizer &amp; Live RTA Spectrum</h2>
+          <p>Tracing audio samples from Python beat/peak analysis into TimelineEditor canvases, Web Audio nodes, and Fairlight meters.</p>
+        </div>
+
+        <div class="diagram-frame" id="diag-audio"></div>
+      </section>
+
+      <!-- 3. FFmpeg Render DAG -->
+      <section id="render-dag" class="doc-section">
+        <div class="section-header">
+          <span class="section-tag">03 / Export Compiler</span>
+          <h2>Asynchronous FFmpeg Filter-Graph Pipeline</h2>
+          <p>How timeline JSON compiles into frame-exact FFmpeg filter chains with rational CFR timing and EBU R128 loudness normalization.</p>
+        </div>
+
+        <div class="diagram-frame" id="diag-render"></div>
+      </section>
+
+      <!-- 4. Interactive Visual Representations -->
+      <section id="visual-simulators" class="doc-section">
+        <div class="section-header">
+          <span class="section-tag">04 / Interactive Representations</span>
+          <h2>Live Waveform, RTA Spectrum &amp; Curve Visualizers</h2>
+          <p>Interactive canvas representations demonstrating the exact math powering Obsidian Cut's audio timeline, Fairlight RTA, and spline keyframes.</p>
+        </div>
+
+        <div class="playground-grid">
+          <!-- Waveform Slice Sim -->
+          <div class="playground-card">
+            <div class="playground-head">
+              <h3>1. Audio Clip Waveform Slice &amp; Fade</h3>
+              <span class="chip">AudioClipWaveform.tsx</span>
+            </div>
+            <div class="playground-body">
+              <canvas id="sim-waveform" class="sim-canvas"></canvas>
+              <div class="control-grid">
+                <label class="control-item">
+                  <span>Trim Start Offset</span>
+                  <input id="wf-trim" type="range" min="0" max="0.8" step="0.02" value="0" />
+                </label>
+                <label class="control-item">
+                  <span>Volume Rubber-Band</span>
+                  <input id="wf-vol" type="range" min="0.2" max="1.5" step="0.05" value="1" />
+                </label>
+                <label class="control-item">
+                  <span>Fade In Width</span>
+                  <input id="wf-fadein" type="range" min="0" max="0.45" step="0.02" value="0.14" />
+                </label>
+                <label class="control-item">
+                  <span>Fade Out Width</span>
+                  <input id="wf-fadeout" type="range" min="0" max="0.45" step="0.02" value="0.18" />
+                </label>
+                <label class="control-item">
+                  <span>Fade Curve</span>
+                  <select id="wf-curve">
+                    <option value="scurve">S-Curve (Smooth)</option>
+                    <option value="linear">Linear Ramp</option>
+                    <option value="exp">Exponential</option>
+                    <option value="log">Logarithmic</option>
+                  </select>
+                </label>
+                <label class="control-item" style="justify-content:center">
+                  <span>Direction</span>
+                  <span style="display:flex;align-items:center;gap:6px;color:var(--text)">
+                    <input id="wf-reverse" type="checkbox" /> Reverse Waveform
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- RTA Spectrum Sim -->
+          <div class="playground-card">
+            <div class="playground-head">
+              <h3>2. Real-Time 32-Band RTA &amp; 3-Band EQ</h3>
+              <span class="chip">AudioSpectrumVisualizer.tsx</span>
+            </div>
+            <div class="playground-body">
+              <canvas id="sim-spectrum" class="sim-canvas"></canvas>
+              <div class="control-grid">
+                <label class="control-item">
+                  <span>Low EQ (&lt;260 Hz)</span>
+                  <input id="eq-low" type="range" min="-12" max="12" step="1" value="0" />
+                </label>
+                <label class="control-item">
+                  <span>Mid EQ (260–2.4k Hz)</span>
+                  <input id="eq-mid" type="range" min="-12" max="12" step="1" value="0" />
+                </label>
+                <label class="control-item">
+                  <span>High EQ (&gt;2.4 kHz)</span>
+                  <input id="eq-high" type="range" min="-12" max="12" step="1" value="0" />
+                </label>
+                <label class="control-item">
+                  <span>Visualizer Mode</span>
+                  <select id="spec-mode">
+                    <option value="bars">Bars + Peak Hold</option>
+                    <option value="curve">Spline Curve Area</option>
+                    <option value="mirror">Symmetric Mirror</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Crossfade & Easing Sim -->
+          <div class="playground-card">
+            <div class="playground-head">
+              <h3>3. Crossfade &amp; Keyframe Easing Curves</h3>
+              <span class="chip">Fairlight &amp; Fusion</span>
+            </div>
+            <div class="playground-body">
+              <canvas id="sim-curves" class="sim-canvas"></canvas>
+              <div class="control-grid">
+                <label class="control-item" style="grid-column: span 2">
+                  <span>Curve / Easing Function</span>
+                  <select id="curve-kind">
+                    <option value="scurve">S-Curve / Ease In-Out (Cosine Equal-Blend)</option>
+                    <option value="linear">Linear Ramp (Constant Slope)</option>
+                    <option value="exp">Exponential / Ease In (Quadratic Swell)</option>
+                    <option value="easeOut">Ease Out (Fast Attack Deceleration)</option>
+                  </select>
+                </label>
+              </div>
+              <p style="font-size:12px;color:var(--text-muted);margin:0">
+                Green shows outgoing clip attenuation / inverse curve; Amber shows incoming fade-in or animated Fusion keyframe progression.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. Frontend <-> Backend Parity Matrix -->
+      <section id="parity-matrix" class="doc-section">
+        <div class="section-header">
+          <span class="section-tag">05 / Mathematical Parity</span>
+          <h2>Browser Preview ↔ FFmpeg Export 1:1 Mapping</h2>
+          <p>Every interactive preview calculation in TypeScript mirrors an exact filter expression in Python so "what you preview is what renders."</p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Feature</th>
+                <th>Browser Evaluation (TypeScript)</th>
+                <th>FFmpeg Export Compilation (Python)</th>
+              </tr>
+            </thead>
+            <tbody id="parity-table-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 6. Directory Tree -->
+      <section id="directory-tree" class="doc-section">
+        <div class="section-header">
+          <span class="section-tag">06 / Repository Map</span>
+          <h2>Complete Project Directory Structure</h2>
+          <p>Layout of every folder and file across frontend, backend, batch automation CLI, and this website kit.</p>
+        </div>
+
+        <pre class="tree-pre">obsidian-cut/
+├── run.sh                         # One-command Unix launcher (installs deps + starts port 3000)
+├── server.ts                      # Express + Vite server, HTTP 206 streaming &amp; Python process manager
+├── package.json                   # React 19, Vite 8, Tailwind v4, Express, Multer scripts &amp; deps
+├── index.html                     # Main SPA entry point
+├── tsconfig.json                  # TypeScript ES2022 configuration
+├── vite.config.ts                 # Vite React + Tailwind CSS plugin setup
+├── README.md                      # Complete user manual, tutorials &amp; API reference
+├── backend/
+│   └── engine.py                  # Python stdlib HTTP + FFmpeg engine (ingest, BPM, filter_complex, renders)
+├── autoengine/
+│   ├── cli.py                     # CLI (`validate`, `run`, `--dry-run`, `--workers`, `--server`)
+│   ├── wrapper.py                 # ObsidianAutoEngine batch orchestrator (`auto` &amp; `timeline` modes)
+│   ├── hjson_parser.py            # Zero-dependency HJSON manifest parser
+│   └── examples/
+│       ├── batch_videos.hjson     # Multi-video automation manifest example
+│       └── run_example.py         # Programmatic Python wrapper script
+├── src/
+│   ├── App.tsx                    # Workspace modes, 60-step Undo/Redo, shortcuts, Quick Render &amp; state
+│   ├── index.css                  # Tailwind CSS v4 &amp; Dark/Light studio tokens
+│   ├── types/
+│   │   └── editor.ts              # Canonical TypeScript data models &amp; 30 transition definitions
+│   ├── utils/
+│   │   ├── timelineMath.ts        # Keyframes, gain envelopes, LUFS meters, spectrum bands &amp; timeline ops
+│   │   ├── waveformCache.ts       # 1,600-bin Web Audio PCM waveform decoder &amp; URL cache
+│   │   ├── liveAudioSpectrum.ts   # Singleton AnalyserNode FFT bus for 60fps spectrum canvases
+│   │   ├── titleRenderer.ts       # Vector Title Canvas renderer &amp; transparent PNG export
+│   │   └── pluginSandbox.ts       # Fault-isolated Canvas effect guard &amp; parameter clamps
+│   └── components/
+│       ├── AutoModeBar.tsx        # Beat-Sync auto assembly bar
+│       ├── TimelineEditor.tsx     # Boundless Tracks, Rough Cut &amp; waveform rubber-band editor
+│       ├── AudioClipWaveform.tsx  # High-DPI trimmed/reversed waveform &amp; beat canvas
+│       ├── AudioSpectrumVisualizer.tsx  # 28–48 band logarithmic RTA spectrum (Bars/Curve/Mirror)
+│       ├── AudioMeterBar.tsx      # Stereo L/R Peak/RMS dBFS meter bar with peak-hold
+│       ├── PreviewCanvas.tsx      # Live 2D Canvas compositor, crop/resize handles &amp; Web Audio bus
+│       ├── QuickRenderPage.tsx    # Dedicated in-page fast export &amp; Auto-Select Everything studio
+│       ├── MediaBin.tsx           # 80+ format asset ingest, sample pack, titles &amp; grade entry
+│       ├── ClipInspectorPanel.tsx # Transform, crop, chroma key, fades, envelope graph &amp; LUT scope
+│       ├── FusionVfxStudio.tsx    # VFX nodes, particles, rotoscoping, camera tracker &amp; Krokodove
+│       ├── KeyframeGraphEditor.tsx# Interactive spline keyframe animation controller
+│       ├── FairlightAudioStudio.tsx # Submix buses, faders, crossfade UI, EQ, VST3 &amp; ADR booth
+│       ├── MultiMasterEditStudio.tsx # 5 trim modes, Mark In/Out, Nested Sequences &amp; Power/Smart Bins
+│       ├── TransitionLibraryPanel.tsx # Grouped browser for 30 FFmpeg xfade transitions
+│       ├── ColorGradingPlugin.tsx # Per-Picture &amp; Master LUT rack + Compare bypass
+│       ├── TitleStyleControls.tsx # Typography, alignment &amp; hex color controls
+│       ├── ExportModal.tsx        # Full resolution/FPS/format/LUFS export modal
+│       └── TutorialModal.tsx      # 7-step interactive guided tour
+└── website_folder/                # This static documentation &amp; architecture website kit</pre>
+      </section>
+
+      <!-- 7. Every File Explained -->
+      <section id="codebase" class="doc-section">
+        <div class="section-header">
+          <span class="section-tag">07 / Module Breakdown</span>
+          <h2>Every File &amp; Subsystem Explained</h2>
+          <p>Filter by architectural layer or type in the top search bar to inspect exported functions and responsibilities.</p>
+        </div>
+
+        <div class="filter-bar" id="layer-filters">
+          <button type="button" class="pill-btn active" data-layer="all">All Modules</button>
+          <button type="button" class="pill-btn" data-layer="frontend">Frontend UI</button>
+          <button type="button" class="pill-btn" data-layer="audio">Audio &amp; DSP</button>
+          <button type="button" class="pill-btn" data-layer="math">Core Math &amp; VFX</button>
+          <button type="button" class="pill-btn" data-layer="backend">Backend &amp; Server</button>
+          <button type="button" class="pill-btn" data-layer="cli">autoengine CLI</button>
+        </div>
+
+        <div class="module-grid" id="module-grid"></div>
+      </section>
+
+      <!-- 8. Studio Modes & Keyboard Shortcuts -->
+      <section id="workflows" class="doc-section">
+        <div class="section-header">
+          <span class="section-tag">08 / Studio Modes &amp; Controls</span>
+          <h2>Four Specialized Workspaces &amp; Shortcuts</h2>
+          <p>All four modes operate over the same unified timeline state so switching between Quick Render, Endless Workspace, and Fairlight is seamless.</p>
+        </div>
+
+        <div class="card-grid" style="margin-bottom:18px">
+          <div class="card">
+            <h3>1. Auto Mode (Beat Sync)</h3>
+            <p>Analyzes music tempo (BPM) and cut-points, then aligns photo/video cuts, Ken Burns motion, and transitions directly onto musical beats.</p>
+          </div>
+          <div class="card">
+            <h3>2. Endless Workspace</h3>
+            <p>Stack unlimited Overlay (OL), Video (V), and Audio (A) tracks vertically with Rough Cut snap unlock, waveform volume draggers, and curved fade handles.</p>
+          </div>
+          <div class="card">
+            <h3>3. Advanced Mode</h3>
+            <p>Houses four pro sub-studios: <strong>Fusion</strong> (Keyframes + Particles/Roto), <strong>Fairlight</strong> (Meters, RTA Spectrum, Crossfades, ADR), <strong>MultiMaster</strong>, and <strong>Transitions</strong>.</p>
+          </div>
+          <div class="card">
+            <h3>4. Quick Render Page</h3>
+            <p>Streamlined export-first workspace with <strong>Auto-Select Everything</strong> (transitions, opacity fades, BGM looping/ducking), Audio Normalizer, and inline video playback.</p>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Shortcut / Gesture</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="shortcuts-table-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 9. Installation Guide -->
+      <section id="installation" class="doc-section">
+        <div class="section-header">
+          <span class="section-tag">09 / Installation &amp; Deployment</span>
+          <h2>Complete Installation Guide (All Platforms)</h2>
+          <p>Requires Node.js 20+, Python 3.9+ (zero pip dependencies), and FFmpeg/FFprobe on PATH.</p>
+        </div>
+
+        <div class="tabs" id="install-tabs">
+          <button type="button" class="tab-btn active" data-install="runsh">./run.sh (Quick Start)</button>
+          <button type="button" class="tab-btn" data-install="linux">Linux / WSL2</button>
+          <button type="button" class="tab-btn" data-install="windows">Windows 10 / 11</button>
+          <button type="button" class="tab-btn" data-install="macos">macOS (Homebrew)</button>
+          <button type="button" class="tab-btn" data-install="production">Production &amp; CLI</button>
+        </div>
+
+        <div id="install-panel"></div>
+
+        <div class="callout">
+          <strong>Environment Variables:</strong> Set <code>OBSIDIANCUT_DATA_DIR</code> to store uploads, proxies, and rendered exports on a larger SSD/drive, or <code>PYTHON_BIN</code> to target a specific Python 3 interpreter.
+        </div>
+      </section>
+
+      <!-- 10. REST API Reference -->
+      <section id="api" class="doc-section">
+        <div class="section-header">
+          <span class="section-tag">10 / HTTP API Reference</span>
+          <h2>Express Gateway REST Endpoints (:3000/api/*)</h2>
+          <p>Every endpoint proxied or served by <code>server.ts</code> with safe ID validation and HTTP 206 byte-range support.</p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Method</th>
+                <th>Endpoint</th>
+                <th>Behavior &amp; Example Command</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="api-table-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 11. autoengine HJSON CLI -->
+      <section id="cli" class="doc-section">
+        <div class="section-header">
+          <span class="section-tag">11 / Batch Video Automation</span>
+          <h2>Declarative HJSON CLI (<code>autoengine</code>)</h2>
+          <p>Render dozens of beat-synced or explicit multi-track timelines headlessly from a single human-readable <code>.hjson</code> manifest.</p>
+        </div>
+
+        <div class="code-wrap">
+          <div class="code-head">
+            <span>bash — CLI Batch Workflow</span>
+            <button type="button" class="copy-btn" data-copy="python3 -m autoengine validate autoengine/examples/batch_videos.hjson&#10;python3 -m autoengine run autoengine/examples/batch_videos.hjson --dry-run&#10;python3 -m autoengine run autoengine/examples/batch_videos.hjson --workers 2 --report autoengine/output/batch_report.json">Copy</button>
+          </div>
+          <pre><code># 1. Validate manifest paths &amp; options
+python3 -m autoengine validate autoengine/examples/batch_videos.hjson
+
+# 2. Preview clip assembly without encoding
+python3 -m autoengine run autoengine/examples/batch_videos.hjson --dry-run
+
+# 3. Execute parallel FFmpeg renders with JSON report
+python3 -m autoengine run autoengine/examples/batch_videos.hjson --workers 2 --report autoengine/output/batch_report.json</code></pre>
+        </div>
+      </section>
+
+      <footer class="site-footer">
+        <span>Obsidian Cut Documentation &amp; Architecture Kit (<code>website_folder/</code>)</span>
+        <span>Zero build dependencies · Ready for GitHub Pages, Vercel, Netlify, or Nginx</span>
+      </footer>
+    </main>
+  </div>
+
+  <script src="docs-data.js"></script>
+  <script src="diagrams.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
