@@ -10,15 +10,19 @@ const PORT = 3000;
 const PY_HOST = '127.0.0.1';
 const PY_PORT = 3001;
 
-const DATA_DIR = path.resolve(process.cwd(), '.obsidiancut_data');
+const DATA_DIR = process.env.OBSIDIANCUT_DATA_DIR
+  ? path.resolve(process.env.OBSIDIANCUT_DATA_DIR)
+  : path.resolve(process.cwd(), '.obsidiancut_data');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const THUMB_DIR = path.join(DATA_DIR, 'thumbs');
 const PROXY_DIR = path.join(DATA_DIR, 'proxies');
+const RENDER_DIR = path.join(DATA_DIR, 'renders');
 const ASSETS_INDEX = path.join(DATA_DIR, 'assets.json');
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 fs.mkdirSync(THUMB_DIR, { recursive: true });
 fs.mkdirSync(PROXY_DIR, { recursive: true });
+fs.mkdirSync(RENDER_DIR, { recursive: true });
 
 interface StoredAsset {
   id: string;
@@ -245,34 +249,75 @@ function toPublicAsset(a: StoredAsset) {
   };
 }
 
-function streamFileWithRange(req: Request, res: Response, filePath: string, mime: string) {
+const MAX_RANGE_CHUNK_BYTES = 8 * 1024 * 1024;
+
+function streamFileWithRange(
+  req: Request,
+  res: Response,
+  filePath: string,
+  mime: string,
+  options?: { downloadName?: string; noStore?: boolean },
+) {
   const stat = fs.statSync(filePath);
+  const baseHeaders: Record<string, string | number> = {
+    'Accept-Ranges': 'bytes',
+    'Content-Type': mime,
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': options?.downloadName || options?.noStore ? 'no-store' : 'public, max-age=3600',
+  };
+  if (options?.downloadName) {
+    baseHeaders['Content-Disposition'] = `attachment; filename="${options.downloadName}"`;
+  }
+
   const range = req.headers.range;
-  if (range) {
-    const parts = range.replace(/bytes=/, '').split('-');
-    const start = Math.max(0, parseInt(parts[0], 10) || 0);
-    const rawEnd = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
-    const end = Math.min(stat.size - 1, Number.isFinite(rawEnd) ? rawEnd : stat.size - 1);
+  if (range && stat.size > 0) {
+    const match = /^bytes=(\d*)-(\d*)$/i.exec(range.trim());
+    let start = 0;
+    let rawEnd = stat.size - 1;
+    if (match) {
+      if (match[1] === '' && match[2] !== '') {
+        const suffix = Math.max(1, parseInt(match[2], 10) || 0);
+        start = Math.max(0, stat.size - suffix);
+        rawEnd = stat.size - 1;
+      } else {
+        start = Math.max(0, parseInt(match[1], 10) || 0);
+        rawEnd = match[2] ? parseInt(match[2], 10) : stat.size - 1;
+      }
+    }
+    const end = Math.min(
+      stat.size - 1,
+      start + MAX_RANGE_CHUNK_BYTES - 1,
+      Number.isFinite(rawEnd) ? rawEnd : stat.size - 1,
+    );
     if (start >= stat.size || start > end) {
       res.status(416).setHeader('Content-Range', `bytes */${stat.size}`).end();
       return;
     }
     const chunkSize = end - start + 1;
     res.writeHead(206, {
+      ...baseHeaders,
       'Content-Range': `bytes ${start}-${end}/${stat.size}`,
-      'Accept-Ranges': 'bytes',
       'Content-Length': chunkSize,
-      'Content-Type': mime,
     });
-    fs.createReadStream(filePath, { start, end }).pipe(res);
+    const stream = fs.createReadStream(filePath, { start, end });
+    res.on('close', () => stream.destroy());
+    stream.on('error', () => {
+      if (!res.headersSent) res.status(500).end();
+      else res.destroy();
+    });
+    stream.pipe(res);
   } else {
     res.writeHead(200, {
+      ...baseHeaders,
       'Content-Length': stat.size,
-      'Accept-Ranges': 'bytes',
-      'Content-Type': mime,
-      'Cache-Control': 'public, max-age=3600',
     });
-    fs.createReadStream(filePath).pipe(res);
+    const stream = fs.createReadStream(filePath);
+    res.on('close', () => stream.destroy());
+    stream.on('error', () => {
+      if (!res.headersSent) res.status(500).end();
+      else res.destroy();
+    });
+    stream.pipe(res);
   }
 }
 
@@ -711,24 +756,40 @@ async function bootstrap() {
   });
 
   app.get('/api/render/:jobId/download', (req, res) => {
-    if (!isValidSafeId(req.params.jobId)) {
+    const jobId = req.params.jobId;
+    if (!isValidSafeId(jobId)) {
       res.status(400).json({ error: 'Invalid render job ID' });
       return;
     }
-    const inline = req.query.inline === '1' ? '?inline=1' : '';
+
+    const isInline = req.query.inline === '1';
+    for (const ext of ['mp4', 'mov', 'webm'] as const) {
+      const candidate = path.join(RENDER_DIR, `obsidiancut_${jobId}.${ext}`);
+      if (fs.existsSync(candidate)) {
+        const mime = ext === 'webm' ? 'video/webm' : ext === 'mov' ? 'video/quicktime' : 'video/mp4';
+        const downloadName = isInline ? undefined : `obsidiancut_export_${jobId.slice(0, 8)}.${ext}`;
+        streamFileWithRange(req, res, candidate, mime, { downloadName, noStore: true });
+        return;
+      }
+    }
+
+    const inline = isInline ? '?inline=1' : '';
     const pyReq = http.request(
       {
         hostname: PY_HOST,
         port: PY_PORT,
-        path: `/render/${encodeURIComponent(req.params.jobId)}/download${inline}`,
+        path: `/render/${encodeURIComponent(jobId)}/download${inline}`,
         method: 'GET',
         headers: req.headers.range ? { Range: req.headers.range } : undefined,
       },
       (pyRes) => {
-        res.writeHead(pyRes.statusCode || 200, pyRes.headers);
+        const headers = { ...pyRes.headers };
+        delete headers.connection;
+        res.writeHead(pyRes.statusCode || 200, headers);
         pyRes.pipe(res);
       },
     );
+    res.on('close', () => pyReq.destroy());
     pyReq.on('error', (err) => {
       if (!res.headersSent) res.status(502).json({ error: err.message });
     });

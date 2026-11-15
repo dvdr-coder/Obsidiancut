@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { FolderPlus, Music, Wand2 } from 'lucide-react';
+import { Music, Wand2 } from 'lucide-react';
 import { MediaAsset } from '../types/editor';
 import { AutoAssembleOptions } from '../utils/timelineMath';
 
@@ -7,14 +7,12 @@ interface AutoModeBarProps {
   visualAssets: MediaAsset[];
   audioAssets: MediaAsset[];
   onAutoAssemble: (audioId: string | null, options: AutoAssembleOptions) => void;
-  onLoadSamplePack?: () => void;
 }
 
 export const AutoModeBar: React.FC<AutoModeBarProps> = ({
   visualAssets,
   audioAssets,
   onAutoAssemble,
-  onLoadSamplePack,
 }) => {
   const [selectedAudioId, setSelectedAudioId] = useState<string>('');
   const [beatStride, setBeatStride] = useState<AutoAssembleOptions['beatStride']>(2);
@@ -123,7 +121,7 @@ export const AutoModeBar: React.FC<AutoModeBarProps> = ({
           />
         </div>
 
-        <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 mt-4 cursor-pointer select-none whitespace-nowrap">
+        <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 self-end h-8 cursor-pointer select-none whitespace-nowrap">
           <input
             type="checkbox"
             checked={enableMotion}
@@ -134,22 +132,13 @@ export const AutoModeBar: React.FC<AutoModeBarProps> = ({
         </label>
       </div>
 
-      <div className="flex items-center gap-3">
-        {activeSong ? (
+      <div className="flex items-center gap-3 self-end">
+        {activeSong && (
           <span className="text-xs text-slate-600 dark:text-slate-400 font-mono-tabular hidden xl:inline">
             <Music className="w-3 h-3 inline mr-1 text-blue-500 dark:text-blue-400" />
             {activeSong.bpm || 120} BPM · {activeSong.beats?.length || 0} beats
           </span>
-        ) : visualAssets.length === 0 && onLoadSamplePack ? (
-          <button
-            type="button"
-            onClick={onLoadSamplePack}
-            className="h-9 px-3 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#1d222b] dark:hover:bg-[#262d39] border border-slate-300 dark:border-[#2c3340] text-slate-800 dark:text-slate-200 text-xs font-medium flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <FolderPlus className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
-            <span>Load Sample Pack</span>
-          </button>
-        ) : null}
+        )}
 
         <button
           type="button"

@@ -75,13 +75,20 @@ def build_track_dsp_filters(dsp: dict | None) -> list[str]:
     if abs(eq_high) > 0.2:
         filters.append(f"treble=g={eq_high:.1f}:f=6500:w=0.6")
     if dsp.get("compressorEnabled"):
-        filters.append("acompressor=threshold=-16dB:ratio=3.5:attack=15:release=140:makeup=2.0")
+        thresh_db = safe_float(dsp.get("compThresholdDb", -16.0), -16.0, -40.0, -2.0)
+        ratio = safe_float(dsp.get("compRatio", 3.5), 3.5, 1.5, 12.0)
+        filters.append(f"acompressor=threshold={thresh_db:.1f}dB:ratio={ratio:.2f}:attack=15:release=140:makeup=2.0")
     reverb_mix = safe_float(dsp.get("reverbMix", 0.0), 0.0, 0.0, 0.85)
     if reverb_mix > 0.02:
         wet = round(min(0.65, reverb_mix * 0.6), 2)
         filters.append(f"aecho=0.8:0.85:45|90:{wet}|{round(wet * 0.7, 2)}")
     if dsp.get("normalizeEnabled"):
-        target_lufs = safe_float(dsp.get("normalizeTargetLufs", -16.0), -16.0, -30.0, -5.0)
+        target_lufs = safe_float(
+            dsp.get("normalizeTargetLufs", dsp.get("normalizeTargetDb", -16.0)),
+            -16.0,
+            -30.0,
+            -5.0,
+        )
         filters.append(f"loudnorm=I={target_lufs:.1f}:TP=-1.5:LRA=11")
         filters.append("aresample=48000")
         filters.append("aformat=sample_rates=48000:channel_layouts=stereo")
@@ -970,14 +977,35 @@ def render_job_worker(job_id: str, payload: dict) -> None:
                 total_duration = end_t
         total_duration = max(0.5, round(total_duration, 3))
 
-        cmd: list[str] = [FFMPEG_BIN, "-y", "-nostdin", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1"]
+        cmd: list[str] = [
+            FFMPEG_BIN,
+            "-y",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-filter_complex_threads",
+            "0",
+            "-sws_flags",
+            "fast_bilinear",
+            "-progress",
+            "pipe:1",
+        ]
         filter_parts: list[str] = []
 
-        # Base black master canvas stream (yuv420p + uniform CFR timebase for rock-solid AV sync & xfade)
-        base_label = "base0"
-        filter_parts.append(
-            f"color=c=black:s={width}x{height}:r={fps_expr}:d={total_duration:.3f},format=yuv420p,settb={tb_expr}[{base_label}]"
-        )
+        # Lazy black master canvas stream: only synthesized when bottom track starts after t=0,
+        # has gaps/transparency, or no full-frame opaque bottom track exists.
+        base_label: str | None = None
+
+        def ensure_base_canvas() -> str:
+            nonlocal base_label
+            if base_label is None:
+                base_label = "base0"
+                filter_parts.insert(
+                    0,
+                    f"color=c=black:s={width}x{height}:r={fps_expr}:d={total_duration:.3f},format=yuv420p,settb={tb_expr}[{base_label}]",
+                )
+            return base_label
 
         input_idx = 0
         audio_mix_labels: list[str] = []
@@ -1068,7 +1096,7 @@ def render_job_worker(job_id: str, payload: dict) -> None:
                 cmd.extend(["-framerate", fps_expr, "-i", str(tmp_png)])
             elif c_kind == "image":
                 m_path = resolve_media_path(clip["mediaId"])
-                cmd.extend(["-i", str(m_path)])
+                cmd.extend(["-framerate", fps_expr, "-i", str(m_path)])
             else:  # video
                 m_path = resolve_media_path(clip["mediaId"])
                 src_dur = dur * speed
@@ -1109,23 +1137,23 @@ def render_job_worker(job_id: str, payload: dict) -> None:
                     z_expr, x_expr, y_expr = "1.10", f"(iw-iw/zoom)*(1-on/{total_frames})", "ih/2-(ih/zoom/2)"
                 else:
                     z_expr, x_expr, y_expr = "1.10", f"(iw-iw/zoom)*(on/{total_frames})", "ih/2-(ih/zoom/2)"
-                work_w = make_even(int(box_w * 1.15))
-                work_h = make_even(int(box_h * 1.15))
-                chain.append(f"scale={work_w}:{work_h}:force_original_aspect_ratio=increase,crop={work_w}:{work_h}")
+                work_w = make_even(int(box_w * 1.06))
+                work_h = make_even(int(box_h * 1.06))
+                chain.append(f"scale={work_w}:{work_h}:force_original_aspect_ratio=increase:flags=fast_bilinear,crop={work_w}:{work_h}")
                 chain.append(f"zoompan=z='{z_expr}':x='{x_expr}':y='{y_expr}':d={total_frames}:s={box_w}x{box_h}:fps={fps_expr}")
-                chain.append(f"setpts=PTS-STARTPTS,settb={tb_expr}")
+                chain.append(f"fps={fps_expr},setpts=PTS-STARTPTS,settb={tb_expr}")
             elif fit == "contain" or not force_exact_box:
                 if force_exact_box:
-                    chain.append(f"scale={box_w}:{box_h}:force_original_aspect_ratio=decrease,pad={box_w}:{box_h}:(ow-iw)/2:(oh-ih)/2:color=black")
+                    chain.append(f"scale={box_w}:{box_h}:force_original_aspect_ratio=decrease:flags=fast_bilinear,pad={box_w}:{box_h}:(ow-iw)/2:(oh-ih)/2:color=black")
                 elif fit == "cover":
-                    chain.append(f"scale={box_w}:{box_h}:force_original_aspect_ratio=increase")
+                    chain.append(f"scale={box_w}:{box_h}:force_original_aspect_ratio=increase:flags=fast_bilinear")
                 else:
-                    chain.append(f"scale={box_w}:{box_h}:force_original_aspect_ratio=decrease")
+                    chain.append(f"scale={box_w}:{box_h}:force_original_aspect_ratio=decrease:flags=fast_bilinear")
             else:
-                chain.append(f"scale={box_w}:{box_h}:force_original_aspect_ratio=increase,crop={box_w}:{box_h}")
+                chain.append(f"scale={box_w}:{box_h}:force_original_aspect_ratio=increase:flags=fast_bilinear,crop={box_w}:{box_h}")
 
             if not force_exact_box and (abs(scale_x - 1.0) > 0.01 or abs(scale_y - 1.0) > 0.01):
-                chain.append(f"scale=max(2\\,trunc(iw*{scale_x:.4f}/2)*2):max(2\\,trunc(ih*{scale_y:.4f}/2)*2)")
+                chain.append(f"scale=max(2\\,trunc(iw*{scale_x:.4f}/2)*2):max(2\\,trunc(ih*{scale_y:.4f}/2)*2):flags=fast_bilinear")
 
             if c_kind == "video":
                 if reverse:
@@ -1140,6 +1168,12 @@ def render_job_worker(job_id: str, payload: dict) -> None:
             if isinstance(clip_cg, dict) and clip_cg.get("enabled"):
                 chain.extend(build_color_grade_filters(clip_cg))
             chain.extend(build_clip_effects_filters(clip.get("effects")))
+
+            fusion_cfg = clip.get("fusion")
+            if isinstance(fusion_cfg, dict) and fusion_cfg.get("enabled"):
+                glow_amt = safe_float(fusion_cfg.get("glowAmount", 0.0), 0.0, 0.0, 1.0)
+                if glow_amt > 0.05:
+                    chain.append(f"eq=brightness={min(0.18, glow_amt * 0.12):.3f}:contrast={1.0 + glow_amt * 0.08:.3f}")
 
             if force_exact_box:
                 chain.append("format=yuv420p,setsar=1")
@@ -1158,29 +1192,53 @@ def render_job_worker(job_id: str, payload: dict) -> None:
                 chain.append(f"loop=loop={max(0, total_frames - 1)}:size=1:start=0")
                 chain.append(f"setpts=N/(({fps_expr})*TB),fps={fps_expr},settb={tb_expr}")
 
+            out_lbl = f"vc{c_idx}"
             if force_exact_box:
                 if fade_in > 0.03:
                     chain.append(f"fade=t=in:st=0:d={fade_in:.3f}")
                 if fade_out > 0.03:
                     fo_st = max(0.0, dur - fade_out)
                     chain.append(f"fade=t=out:st={fo_st:.3f}:d={fade_out:.3f}")
+                filter_parts.append(f"[{cur_inp}:v]{','.join(chain)}[{out_lbl}]")
             else:
+                tail_chain: list[str] = []
                 if scale_is_anim:
-                    chain.append(
+                    tail_chain.append(
                         f"scale=w='max(2\\,trunc((iw*({scale_expr}))/2)*2)':h='max(2\\,trunc((ih*({scale_expr}))/2)*2)':eval=frame"
                     )
                 if rot_is_anim:
-                    chain.append(f"rotate=a='{rot_expr}':ow='hypot(iw\\,ih)':oh='hypot(iw\\,ih)':c=none")
-                if op_is_anim:
-                    chain.append(f"geq=r='r(X\\,Y)':g='g(X\\,Y)':b='b(X\\,Y)':a='alpha(X\\,Y)*({op_expr})',format=yuva420p")
+                    tail_chain.append(f"rotate=a='{rot_expr}':ow='hypot(iw\\,ih)':oh='hypot(iw\\,ih)':c=none")
                 if fade_in > 0.03:
-                    chain.append(f"fade=t=in:st=0:d={fade_in:.3f}:alpha=1")
+                    tail_chain.append(f"fade=t=in:st=0:d={fade_in:.3f}:alpha=1")
                 if fade_out > 0.03:
                     fo_st = max(0.0, dur - fade_out)
-                    chain.append(f"fade=t=out:st={fo_st:.3f}:d={fade_out:.3f}:alpha=1")
+                    tail_chain.append(f"fade=t=out:st={fo_st:.3f}:d={fade_out:.3f}:alpha=1")
 
-            out_lbl = f"vc{c_idx}"
-            filter_parts.append(f"[{cur_inp}:v]{','.join(chain)}[{out_lbl}]")
+                if op_is_anim:
+                    # Fast animated alpha modulation: evaluate opacity on a 2x2 mask, scale via neighbor, multiply with existing alpha
+                    preop_lbl = f"preop{c_idx}"
+                    sp_a = f"opa{c_idx}"
+                    sp_b = f"opb{c_idx}"
+                    a0_lbl = f"a0_{c_idx}"
+                    m2_lbl = f"m2_{c_idx}"
+                    ms_lbl = f"ms_{c_idx}"
+                    ref_lbl = f"ref_{c_idx}"
+                    am_lbl = f"am_{c_idx}"
+                    mask_dur = dur + (4.0 / fps_num)
+                    filter_parts.append(f"[{cur_inp}:v]{','.join(chain)}[{preop_lbl}]")
+                    filter_parts.append(f"[{preop_lbl}]split[{sp_a}][{sp_b}]")
+                    filter_parts.append(f"[{sp_a}]alphaextract[{a0_lbl}]")
+                    filter_parts.append(
+                        f"color=c=white:s=2x2:r={fps_expr}:d={mask_dur:.3f},format=gray,geq=lum='255*({op_expr})'[{m2_lbl}]"
+                    )
+                    filter_parts.append(f"[{m2_lbl}][{sp_b}]scale2ref=flags=neighbor[{ms_lbl}][{ref_lbl}]")
+                    filter_parts.append(f"[{a0_lbl}][{ms_lbl}]blend=all_mode=multiply:shortest=1[{am_lbl}]")
+                    tail_str = ("," + ",".join(tail_chain)) if tail_chain else ""
+                    filter_parts.append(f"[{ref_lbl}][{am_lbl}]alphamerge{tail_str}[{out_lbl}]")
+                else:
+                    chain.extend(tail_chain)
+                    filter_parts.append(f"[{cur_inp}:v]{','.join(chain)}[{out_lbl}]")
+
             return out_lbl, cur_inp, dur, is_credits
 
         clip_counter = 0
@@ -1271,6 +1329,11 @@ def render_job_worker(job_id: str, payload: dict) -> None:
                             a_chain.extend(build_atempo_chain(sc_speed))
                             track_mult = safe_float(float(trk.get("volume", 1.0)), 1.0, 0.0, 2.0)
                             a_chain.extend(build_audio_gain_filters(sc, s_dur, track_mult, clips, audio_track_map))
+                            v_pan = safe_float(sc.get("pan", 0.0), 0.0, -1.0, 1.0)
+                            if abs(v_pan) > 0.02:
+                                l_gain = max(0.0, min(1.0, 1.0 - max(0.0, v_pan)))
+                                r_gain = max(0.0, min(1.0, 1.0 + min(0.0, v_pan)))
+                                a_chain.append(f"pan=stereo|c0={l_gain:.3f}*c0|c1={r_gain:.3f}*c1")
                             v_curve = map_afade_curve(sc.get("audioFadeCurve", "scurve"))
                             v_fi = safe_float(sc.get("fadeIn", 0.0), 0.0, 0.0, s_dur * 0.48)
                             v_fo = safe_float(sc.get("fadeOut", 0.0), 0.0, 0.0, s_dur * 0.48)
@@ -1311,17 +1374,46 @@ def render_job_worker(job_id: str, payload: dict) -> None:
                         cum_len = offset + seq_durs[j + 1]
 
                     seq_end = round(seq_start + cum_len, 3)
-                    shifted_lbl = f"sh{clip_counter}"
-                    filter_parts.append(f"[{prev_lbl}]setpts=PTS-STARTPTS+{seq_start:.3f}/TB[{shifted_lbl}]")
-                    next_base = f"b_{clip_counter}"
-                    filter_parts.append(
-                        f"[{base_label}][{shifted_lbl}]overlay=0:0:enable='between(t,{seq_start:.3f},{seq_end:.3f})':eof_action=pass[{next_base}]"
-                    )
-                    base_label = next_base
+                    if base_label is None and is_bottom_video_track and seq_start <= 0.04:
+                        if seq_end < total_duration - 0.04:
+                            pad_lbl = f"b_{clip_counter}"
+                            tail_pad = round(max(0.05, total_duration - seq_end + (2.0 / fps_num)), 3)
+                            filter_parts.append(
+                                f"[{prev_lbl}]tpad=stop_mode=add:stop_duration={tail_pad:.3f}:color=black,fps={fps_expr},settb={tb_expr}[{pad_lbl}]"
+                            )
+                            base_label = pad_lbl
+                        else:
+                            base_label = prev_lbl
+                    else:
+                        cur_base = ensure_base_canvas()
+                        shifted_lbl = f"sh{clip_counter}"
+                        filter_parts.append(f"[{prev_lbl}]setpts=PTS-STARTPTS+{seq_start:.3f}/TB[{shifted_lbl}]")
+                        next_base = f"b_{clip_counter}"
+                        filter_parts.append(
+                            f"[{cur_base}][{shifted_lbl}]overlay=0:0:enable='between(t,{seq_start:.3f},{seq_end:.3f})':eof_action=pass[{next_base}]"
+                        )
+                        base_label = next_base
                 else:
                     sc = seq[0]
                     c_start = max(0.0, float(sc.get("startTime", 0.0)))
-                    lbl, inp_used, c_dur, is_credits = prepare_visual_clip_input(sc, clip_counter, width, height, False)
+                    can_direct_bottom = (
+                        base_label is None
+                        and is_bottom_video_track
+                        and c_start <= 0.04
+                        and sc.get("kind") != "title"
+                        and float(sc.get("opacity", 1.0)) >= 0.99
+                        and abs(float(sc.get("scale", 1.0)) - 1.0) < 0.02
+                        and abs(float(sc.get("scaleX", 1.0) or 1.0) - 1.0) < 0.02
+                        and abs(float(sc.get("scaleY", 1.0) or 1.0) - 1.0) < 0.02
+                        and abs(float(sc.get("x", 0.0))) < 0.5
+                        and abs(float(sc.get("y", 0.0))) < 0.5
+                        and abs(float(sc.get("rotation", 0.0))) < 0.2
+                        and not (sc.get("effects") or {}).get("chromaKeyEnabled")
+                        and not clip_has_keyframes(sc)
+                    )
+                    lbl, inp_used, c_dur, is_credits = prepare_visual_clip_input(
+                        sc, clip_counter, width, height, can_direct_bottom
+                    )
                     clip_counter += 1
                     c_end = round(c_start + c_dur, 3)
 
@@ -1339,6 +1431,11 @@ def render_job_worker(job_id: str, payload: dict) -> None:
                         a_chain.extend(build_atempo_chain(sc_speed))
                         track_mult = safe_float(float(trk.get("volume", 1.0)), 1.0, 0.0, 2.0)
                         a_chain.extend(build_audio_gain_filters(sc, c_dur, track_mult, clips, audio_track_map))
+                        v_pan = safe_float(sc.get("pan", 0.0), 0.0, -1.0, 1.0)
+                        if abs(v_pan) > 0.02:
+                            l_gain = max(0.0, min(1.0, 1.0 - max(0.0, v_pan)))
+                            r_gain = max(0.0, min(1.0, 1.0 + min(0.0, v_pan)))
+                            a_chain.append(f"pan=stereo|c0={l_gain:.3f}*c0|c1={r_gain:.3f}*c1")
                         v_curve = map_afade_curve(sc.get("audioFadeCurve", "scurve"))
                         v_fi = safe_float(sc.get("fadeIn", 0.0), 0.0, 0.0, c_dur * 0.48)
                         v_fo = safe_float(sc.get("fadeOut", 0.0), 0.0, 0.0, c_dur * 0.48)
@@ -1352,42 +1449,57 @@ def render_job_worker(job_id: str, payload: dict) -> None:
                         filter_parts.append(f"[{inp_used}:a]{','.join(a_chain)}[{a_lbl}]")
                         audio_mix_labels.append(f"[{a_lbl}]")
 
-                    shifted_lbl = f"sh{clip_counter}"
-                    filter_parts.append(f"[{lbl}]setpts=PTS-STARTPTS+{c_start:.3f}/TB[{shifted_lbl}]")
-
-                    x_pct = safe_float(sc.get("x", 0.0), 0.0, -100.0, 100.0) / 100.0
-                    y_pct = safe_float(sc.get("y", 0.0), 0.0, -100.0, 100.0) / 100.0
-                    sc_kf = sc.get("keyframes") if isinstance(sc.get("keyframes"), dict) else {}
-                    ov_x_expr, ov_x_anim = build_keyframe_ff_expr(
-                        _sorted_kf_points(sc_kf, "x"), c_dur, f"(t-{c_start:.3f})", x_pct * 100.0, 0.01, -1.0, 1.0
-                    )
-                    ov_y_expr, ov_y_anim = build_keyframe_ff_expr(
-                        _sorted_kf_points(sc_kf, "y"), c_dur, f"(t-{c_start:.3f})", y_pct * 100.0, 0.01, -1.0, 1.0
-                    )
-                    x_expr = f"(W-w)/2+(({ov_x_expr})*W)"
-                    if is_credits:
-                        y_expr = f"H-((t-{c_start:.3f})/{c_dur:.3f})*(H+h)"
+                    if can_direct_bottom and not is_credits:
+                        if c_end < total_duration - 0.04:
+                            pad_lbl = f"b_{clip_counter}"
+                            tail_pad = round(max(0.05, total_duration - c_end + (2.0 / fps_num)), 3)
+                            filter_parts.append(
+                                f"[{lbl}]tpad=stop_mode=add:stop_duration={tail_pad:.3f}:color=black,fps={fps_expr},settb={tb_expr}[{pad_lbl}]"
+                            )
+                            base_label = pad_lbl
+                        else:
+                            base_label = lbl
                     else:
-                        y_expr = f"(H-h)/2+(({ov_y_expr})*H)"
+                        cur_base = ensure_base_canvas()
+                        shifted_lbl = f"sh{clip_counter}"
+                        filter_parts.append(f"[{lbl}]setpts=PTS-STARTPTS+{c_start:.3f}/TB[{shifted_lbl}]")
 
-                    next_base = f"b_{clip_counter}"
-                    filter_parts.append(
-                        f"[{base_label}][{shifted_lbl}]overlay=x='{x_expr}':y='{y_expr}':enable='between(t,{c_start:.3f},{c_end:.3f})':eof_action=pass[{next_base}]"
-                    )
-                    base_label = next_base
+                        fusion_cfg = sc.get("fusion") if isinstance(sc.get("fusion"), dict) else {}
+                        trk_off_x = safe_float(fusion_cfg.get("trackOffsetX", 0.0), 0.0, -50.0, 50.0) if fusion_cfg.get("enabled") else 0.0
+                        trk_off_y = safe_float(fusion_cfg.get("trackOffsetY", 0.0), 0.0, -50.0, 50.0) if fusion_cfg.get("enabled") else 0.0
+                        x_pct = safe_float(sc.get("x", 0.0), 0.0, -100.0, 100.0) / 100.0
+                        y_pct = safe_float(sc.get("y", 0.0), 0.0, -100.0, 100.0) / 100.0
+                        sc_kf = sc.get("keyframes") if isinstance(sc.get("keyframes"), dict) else {}
+                        ov_x_expr, ov_x_anim = build_keyframe_ff_expr(
+                            _sorted_kf_points(sc_kf, "x"), c_dur, f"(t-{c_start:.3f})", x_pct * 100.0, 0.01, -1.0, 1.0
+                        )
+                        ov_y_expr, ov_y_anim = build_keyframe_ff_expr(
+                            _sorted_kf_points(sc_kf, "y"), c_dur, f"(t-{c_start:.3f})", y_pct * 100.0, 0.01, -1.0, 1.0
+                        )
+                        x_expr = f"(W-w)/2+((({ov_x_expr})+{trk_off_x / 100.0:.4f})*W)"
+                        if is_credits:
+                            y_expr = f"H-((t-{c_start:.3f})/{c_dur:.3f})*(H+h)"
+                        else:
+                            y_expr = f"(H-h)/2+((({ov_y_expr})+{trk_off_y / 100.0:.4f})*H)"
+
+                        next_base = f"b_{clip_counter}"
+                        filter_parts.append(
+                            f"[{cur_base}][{shifted_lbl}]overlay=x='{x_expr}':y='{y_expr}':enable='between(t,{c_start:.3f},{c_end:.3f})':eof_action=pass[{next_base}]"
+                        )
+                        base_label = next_base
 
                 i += 1
 
-        # Master Color Grading Plug-in
-        last_video_label = base_label
+        # Master Color Grading Plug-in & final CFR fps normalization
+        last_video_label = ensure_base_canvas()
         cg_filters = build_color_grade_filters(color_grade)
         if cg_filters:
             graded_lbl = "vgraded"
-            filter_parts.append(f"[{last_video_label}]{','.join(cg_filters)},format=yuv420p[{graded_lbl}]")
+            filter_parts.append(f"[{last_video_label}]{','.join(cg_filters)},fps={fps_expr},format=yuv420p[{graded_lbl}]")
             last_video_label = graded_lbl
-        else:
+        elif last_video_label != "base0":
             fmt_lbl = "vfmt"
-            filter_parts.append(f"[{last_video_label}]format=yuv420p[{fmt_lbl}]")
+            filter_parts.append(f"[{last_video_label}]fps={fps_expr},format=yuv420p[{fmt_lbl}]")
             last_video_label = fmt_lbl
 
         # Process dedicated Audio Track clips on unified 48kHz master clock (honoring folder hierarchy, mute, solo, envelopes, ducking, transitions & Fairlight DSP)
@@ -1428,22 +1540,26 @@ def render_job_worker(job_id: str, payload: dict) -> None:
             pos_in_trk = next((i for i, item in enumerate(same_trk_clips) if item.get("id") == aclip.get("id")), -1)
             in_tr_dur = 0.0
             in_tr_curve = "hsin"
+            in_tr_type = "cut"
             if pos_in_trk > 0:
                 prev_a = same_trk_clips[pos_in_trk - 1]
                 prev_end = float(prev_a.get("startTime", 0.0)) + float(prev_a.get("duration", 0.0))
                 if (start_time - prev_end) <= 0.25 and prev_a.get("audioTransitionOut", "cut") != "cut":
                     raw_td = safe_float(prev_a.get("audioTransitionDuration", 1.2), 1.2, 0.1, 5.0)
                     in_tr_dur = min(clip_dur * 0.85, raw_td)
+                    in_tr_type = str(prev_a.get("audioTransitionOut", "crossfade_eq"))
                     in_tr_curve = resolve_xfade_afade_curve(prev_a)
 
             out_tr_dur = 0.0
             out_tr_curve = "hsin"
+            out_tr_type = "cut"
             if pos_in_trk >= 0 and pos_in_trk + 1 < len(same_trk_clips):
                 next_a = same_trk_clips[pos_in_trk + 1]
                 next_start = float(next_a.get("startTime", 0.0))
                 if (next_start - (start_time + clip_dur)) <= 0.25 and aclip.get("audioTransitionOut", "cut") != "cut":
                     raw_td = safe_float(aclip.get("audioTransitionDuration", 1.2), 1.2, 0.1, 5.0)
                     out_tr_dur = min(clip_dur * 0.85, raw_td)
+                    out_tr_type = str(aclip.get("audioTransitionOut", "crossfade_eq"))
                     out_tr_curve = resolve_xfade_afade_curve(aclip)
 
             cmd.extend(["-i", str(a_path)])
@@ -1469,10 +1585,20 @@ def render_job_worker(job_id: str, payload: dict) -> None:
                 fo_st = max(0.0, clip_dur - fade_out)
                 a_chain.append(f"afade=t=out:st={fo_st:.3f}:d={fade_out:.3f}:curve={fade_curve}")
             if in_tr_dur > 0.05:
-                a_chain.append(f"afade=t=in:st=0:d={in_tr_dur:.3f}:curve={in_tr_curve}")
+                if in_tr_type == "dip_swell":
+                    a_chain.append(
+                        f"volume='if(lte(t\\,{in_tr_dur:.3f})\\,0.15+0.85*0.5*(1-cos(PI*t/{in_tr_dur:.3f}))\\,1)':eval=frame"
+                    )
+                else:
+                    a_chain.append(f"afade=t=in:st=0:d={in_tr_dur:.3f}:curve={in_tr_curve}")
             if out_tr_dur > 0.05:
                 tr_st = max(0.0, clip_dur - out_tr_dur)
-                a_chain.append(f"afade=t=out:st={tr_st:.3f}:d={out_tr_dur:.3f}:curve={out_tr_curve}")
+                if out_tr_type == "dip_swell":
+                    a_chain.append(
+                        f"volume='if(gte(t\\,{tr_st:.3f})\\,0.15+0.85*0.5*(1+cos(PI*(t-{tr_st:.3f})/{out_tr_dur:.3f}))\\,1)':eval=frame"
+                    )
+                else:
+                    a_chain.append(f"afade=t=out:st={tr_st:.3f}:d={out_tr_dur:.3f}:curve={out_tr_curve}")
             d_ms = int(round(start_time * 1000))
             if d_ms > 0:
                 a_chain.append(f"adelay={d_ms}|{d_ms}")
@@ -1493,12 +1619,12 @@ def render_job_worker(job_id: str, payload: dict) -> None:
             if len(audio_mix_labels) == 1:
                 single = audio_mix_labels[0].strip("[]")
                 filter_parts.append(
-                    f"[{single}]atrim=0:{total_duration:.3f},asetpts=PTS-STARTPTS{norm_tail}[aout]"
+                    f"[{single}]apad=whole_dur={total_duration:.3f},atrim=0:{total_duration:.3f},asetpts=PTS-STARTPTS{norm_tail}[aout]"
                 )
             else:
                 filter_parts.append(
                     f"{''.join(audio_mix_labels)}amix=inputs={len(audio_mix_labels)}:duration=longest:dropout_transition=0:normalize=0,"
-                    f"atrim=0:{total_duration:.3f},asetpts=PTS-STARTPTS{norm_tail}[aout]"
+                    f"apad=whole_dur={total_duration:.3f},atrim=0:{total_duration:.3f},asetpts=PTS-STARTPTS{norm_tail}[aout]"
                 )
 
         cmd.extend(["-filter_complex", ";".join(filter_parts)])
@@ -1511,14 +1637,22 @@ def render_job_worker(job_id: str, payload: dict) -> None:
             if has_final_audio:
                 cmd.extend(["-c:a", "libvorbis", "-b:a", "192k"])
         else:
-            crf = "19" if width >= 1920 else "20"
-            cmd.extend(["-c:v", "libx264", "-preset", speed_preset, "-crf", crf, "-pix_fmt", "yuv420p"])
+            if speed_preset == "ultrafast":
+                x264_preset = "ultrafast"
+                crf = "22"
+            elif speed_preset in {"veryfast", "superfast"}:
+                x264_preset = "superfast"
+                crf = "21"
+            else:
+                x264_preset = "fast"
+                crf = "19"
+            cmd.extend(["-c:v", "libx264", "-preset", x264_preset, "-crf", crf, "-pix_fmt", "yuv420p"])
             if has_final_audio:
                 cmd.extend(["-c:a", "aac", "-b:a", "192k", "-ar", "48000"])
             if fmt == "mp4":
                 cmd.extend(["-movflags", "+faststart"])
 
-        cmd.extend(["-vsync", "cfr", "-max_muxing_queue_size", "2048", "-t", f"{total_duration:.3f}", "-threads", "0", str(out_path)])
+        cmd.extend(["-r", fps_expr, "-vsync", "cfr", "-max_muxing_queue_size", "2048", "-t", f"{total_duration:.3f}", "-threads", "0", str(out_path)])
 
         proc = subprocess.Popen(
             cmd,
@@ -1649,12 +1783,14 @@ class EngineHandler(BaseHTTPRequestHandler):
 
                 file_size = out_path.stat().st_size
                 range_hdr = self.headers.get("Range")
-                if range_hdr and inline:
-                    m = re.match(r"bytes=(\d+)-(\d*)", range_hdr)
+                max_chunk = 8 * 1024 * 1024
+                out_name = job_copy.get("outputName", "obsidiancut_export.mp4")
+                if range_hdr and file_size > 0:
+                    m = re.match(r"bytes=(\d+)-(\d*)", range_hdr.strip())
                     if m:
                         start = int(m.group(1))
-                        end = int(m.group(2)) if m.group(2) else file_size - 1
-                        end = min(end, file_size - 1)
+                        raw_end = int(m.group(2)) if m.group(2) else file_size - 1
+                        end = min(raw_end, start + max_chunk - 1, file_size - 1)
                         if start >= file_size or start > end:
                             self.send_response(416)
                             self.send_header("Content-Range", f"bytes */{file_size}")
@@ -1665,8 +1801,11 @@ class EngineHandler(BaseHTTPRequestHandler):
                         self.send_response(206)
                         self.send_header("Content-Type", mime)
                         self.send_header("Accept-Ranges", "bytes")
+                        self.send_header("Cache-Control", "no-store")
                         self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
                         self.send_header("Content-Length", str(length))
+                        if not inline:
+                            self.send_header("Content-Disposition", f'attachment; filename="{out_name}"')
                         self.end_headers()
                         with open(out_path, "rb") as f:
                             f.seek(start)
@@ -1682,11 +1821,12 @@ class EngineHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", mime)
                 self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Cache-Control", "no-store")
                 self.send_header("Content-Length", str(file_size))
                 if not inline:
                     self.send_header(
                         "Content-Disposition",
-                        f'attachment; filename="{job_copy.get("outputName", "obsidiancut_export.mp4")}"',
+                        f'attachment; filename="{out_name}"',
                     )
                 self.end_headers()
                 with open(out_path, "rb") as f:

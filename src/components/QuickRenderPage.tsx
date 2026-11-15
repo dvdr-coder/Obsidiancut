@@ -7,13 +7,9 @@ import {
   FolderPlus,
   Loader2,
   Music,
-  Pause,
-  Play,
   Sliders,
   Sparkles,
   Upload,
-  Volume2,
-  VolumeX,
   Wand2,
   Zap,
 } from 'lucide-react';
@@ -34,8 +30,7 @@ import {
   formatTimecode,
   QuickAutoSelectOptions,
 } from '../utils/timelineMath';
-import { AudioMeterBar } from './AudioMeterBar';
-import { AudioSpectrumVisualizer } from './AudioSpectrumVisualizer';
+import { downloadRenderedVideo } from '../utils/downloadFile';
 import { PreviewCanvas } from './PreviewCanvas';
 
 interface QuickRenderPageProps {
@@ -66,7 +61,6 @@ interface QuickRenderPageProps {
   onLoadSamplePack: () => void;
   onUploadFiles: (files: FileList | File[]) => void;
   onOpenTimelineMode: () => void;
-  onOpenTutorial?: () => void;
   onAutoSelectQuickRender: (opts: QuickAutoSelectOptions, renderNow?: boolean) => void;
 }
 
@@ -132,11 +126,13 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
   onLoadSamplePack,
   onUploadFiles,
   onOpenTimelineMode,
-  onOpenTutorial,
   onAutoSelectQuickRender,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const opacityCommittedRef = useRef(false);
+  const [dropActive, setDropActive] = useState(false);
+  const [downloadingPct, setDownloadingPct] = useState<number | null>(null);
+  const [downloadErr, setDownloadErr] = useState<string | null>(null);
 
   const [autoOpts, setAutoOpts] = useState<QuickAutoSelectOptions>({
     transitionStyle: 'dynamic',
@@ -153,6 +149,18 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
   const isWorking = renderJob?.status === 'queued' || renderJob?.status === 'rendering';
   const isDone = renderJob?.status === 'completed';
   const isFailed = renderJob?.status === 'failed';
+
+  const handleDownloadFile = async () => {
+    if (!renderJob || downloadingPct !== null) return;
+    setDownloadErr(null);
+    setDownloadingPct(0);
+    const outName = renderJob.outputName || `obsidiancut_export.${exportConfig.format}`;
+    const res = await downloadRenderedVideo(renderJob.jobId, outName, (pct) => setDownloadingPct(pct));
+    setDownloadingPct(null);
+    if (!res.ok) {
+      setDownloadErr(res.error || 'Download failed');
+    }
+  };
 
   const visualAssets = useMemo(
     () => assets.filter((a) => a.mediaType === 'image' || a.mediaType === 'video'),
@@ -233,7 +241,7 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
   };
 
   return (
-    <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0">
+    <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0">
       {/* Left: Auto-Select Everything + Presets + Normalizer Setup */}
       <section className="lg:col-span-5 bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg flex flex-col overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#171b22] flex items-center justify-between gap-2">
@@ -244,13 +252,13 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
             </h2>
           </div>
           <span className="text-[11px] font-mono-tabular text-slate-500 dark:text-slate-400">
-            Auto-Select &amp; Fast Export
+            {visualAssets.length} media · {audioAssets.length} music
           </span>
         </div>
 
         <div className="p-4 space-y-4 overflow-y-auto flex-1">
           {/* Auto-Select Everything Panel */}
-          <div className="p-3 rounded-md border border-blue-200 dark:border-blue-500/35 bg-blue-50/70 dark:bg-[#101724] space-y-3">
+          <div className="p-3.5 rounded-md border border-blue-200 dark:border-blue-500/35 bg-blue-50/70 dark:bg-[#101724] space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
@@ -258,12 +266,12 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
                   Auto-Select Everything
                 </span>
               </div>
-              <span className="text-[10px] font-mono-tabular text-slate-600 dark:text-slate-400">
-                {visualAssets.length} media · {audioAssets.length} music
+              <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                Transitions · Opacity · Music
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2.5">
               <label className="flex flex-col gap-1 text-[11px] text-slate-600 dark:text-slate-300">
                 <span>Transitions Mix</span>
                 <select
@@ -275,7 +283,7 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
                       transitionStyle: e.target.value as QuickAutoSelectOptions['transitionStyle'],
                     }))
                   }
-                  className="h-7 px-2 rounded bg-white dark:bg-[#0b1018] border border-slate-300 dark:border-[#2a3344] text-[11px] text-slate-900 dark:text-slate-100"
+                  className="h-8 px-2 rounded bg-white dark:bg-[#0b1018] border border-slate-300 dark:border-[#2a3344] text-[11px] text-slate-900 dark:text-slate-100"
                 >
                   <option value="dynamic">Dynamic Auto Mix</option>
                   <option value="crossfade">Smooth Dissolves</option>
@@ -291,7 +299,7 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
                   disabled={isWorking}
                   value={autoOpts.audioMode}
                   onChange={(e) => setAutoOpts((prev) => ({ ...prev, audioMode: e.target.value }))}
-                  className="h-7 px-2 rounded bg-white dark:bg-[#0b1018] border border-slate-300 dark:border-[#2a3344] text-[11px] text-slate-900 dark:text-slate-100"
+                  className="h-8 px-2 rounded bg-white dark:bg-[#0b1018] border border-slate-300 dark:border-[#2a3344] text-[11px] text-slate-900 dark:text-slate-100"
                 >
                   <option value="auto">
                     Auto ({audioAssets[0]?.name || 'Best / Sample 120 BPM'})
@@ -307,7 +315,7 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
             </div>
 
             {/* Opacity Slider + Smart Toggles */}
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-slate-600 dark:text-slate-300">Visual Opacity Level</span>
                 <span className="font-mono-tabular font-semibold text-slate-900 dark:text-slate-100">
@@ -334,7 +342,7 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
                 className="studio-slider w-full"
               />
 
-              <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 text-[11px] text-slate-700 dark:text-slate-300 pt-0.5">
+              <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-[11px] text-slate-700 dark:text-slate-300 pt-0.5">
                 <label className="flex items-center gap-1.5 cursor-pointer select-none">
                   <input
                     type="checkbox"
@@ -382,13 +390,13 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
               <button
                 type="button"
                 disabled={isWorking || loadingSample || uploading}
                 onClick={() => onAutoSelectQuickRender(syncedAutoOpts, false)}
                 className="py-2 px-3 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
-                title="Automatically pick transitions, opacity ramps, motion, and playback music, and start live preview"
+                title="Automatically pick media, transitions, opacity ramps, motion, and playback music, then preview"
               >
                 {loadingSample ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -411,8 +419,8 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
           </div>
 
           {/* 1-Click Speed Presets */}
-          <div className="space-y-2">
-            <span className="text-xs font-medium text-slate-700 dark:text-slate-300 block">
+          <div className="space-y-2.5">
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
               1-Click Speed &amp; Format Presets
             </span>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -441,7 +449,7 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
           </div>
 
           {/* Core Output Controls */}
-          <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-200 dark:border-[#222733]">
+          <div className="grid grid-cols-2 gap-2.5 pt-3 border-t border-slate-200 dark:border-[#222733]">
             <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-400">
               <span>Resolution</span>
               <select
@@ -473,9 +481,12 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
                 }
                 className="h-8 px-2 rounded bg-white dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-xs text-slate-900 dark:text-slate-100"
               >
-                <option value={24}>24 fps (Cinema)</option>
+                <option value={23.976}>23.976 fps (NTSC Film)</option>
+                <option value={24}>24 fps (True Cinema)</option>
+                <option value={29.97}>29.97 fps (Broadcast)</option>
                 <option value={30}>30 fps (Standard)</option>
-                <option value={60}>60 fps (High Motion)</option>
+                <option value={59.94}>59.94 fps (Broadcast High)</option>
+                <option value={60}>60 fps (Ultra Smooth)</option>
               </select>
             </label>
 
@@ -518,13 +529,13 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
             </label>
           </div>
 
-          {/* Audio Normalizer + Live Stereo L/R Meter */}
-          <div className="p-3 rounded border border-slate-200 dark:border-[#242c39] bg-slate-50 dark:bg-[#0e1218] space-y-3">
+          {/* Audio Normalizer Setup */}
+          <div className="p-3.5 rounded border border-slate-200 dark:border-[#242c39] bg-slate-50 dark:bg-[#0e1218] space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5">
                 <Sliders className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                 <span className="text-xs font-semibold text-slate-900 dark:text-slate-100">
-                  Audio Normalizer &amp; Live Level Check
+                  EBU R128 Audio Normalizer
                 </span>
               </div>
               <button
@@ -547,7 +558,7 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
               </button>
             </div>
 
-            <div className="grid grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-3 gap-2">
               {[
                 { lufs: -14, label: '-14 LUFS', desc: 'YouTube / Web' },
                 { lufs: -16, label: '-16 LUFS', desc: 'Social / Mobile' },
@@ -568,7 +579,7 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
                         normalizeTargetLufs: opt.lufs,
                       })
                     }
-                    className={`p-1.5 rounded border text-center cursor-pointer disabled:opacity-50 ${
+                    className={`p-2 rounded border text-center cursor-pointer disabled:opacity-50 ${
                       selected
                         ? 'bg-emerald-600/15 dark:bg-emerald-600/20 border-emerald-500 dark:border-emerald-400 text-emerald-800 dark:text-emerald-100'
                         : 'bg-white dark:bg-[#11151d] border-slate-200 dark:border-[#242b38] text-slate-700 dark:text-slate-300 hover:border-slate-400 dark:hover:border-slate-500'
@@ -585,86 +596,17 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
               })}
             </div>
 
-            {/* Live Audition Scrubber + Stereo Meter */}
-            <div className="pt-2 border-t border-slate-200 dark:border-[#1e2531] space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  disabled={clips.length === 0}
-                  onClick={onTogglePlay}
-                  className="px-2.5 py-1 rounded bg-slate-200 dark:bg-[#1a2230] hover:bg-slate-300 dark:hover:bg-[#232e42] disabled:opacity-40 text-xs text-slate-900 dark:text-slate-100 flex items-center gap-1 cursor-pointer"
-                >
-                  {isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
-                  <span>{isPlaying ? 'Pause Music' : 'Play & Check Levels'}</span>
-                </button>
-                <span className="text-[11px] font-mono-tabular text-slate-500 dark:text-slate-400">
-                  {formatTimecode(playhead)} ·{' '}
-                  {masterMuted || meter.estimatedLufs <= -58
-                    ? '-∞ LUFS'
-                    : `${meter.estimatedLufs.toFixed(1)} LUFS`}
-                </span>
-                <button
-                  type="button"
-                  onClick={onToggleMasterMute}
-                  className="p-1 rounded bg-slate-200 dark:bg-[#141821] hover:bg-slate-300 dark:hover:bg-[#1e2431] text-slate-700 dark:text-slate-300 cursor-pointer"
-                  title={masterMuted ? 'Unmute playback' : 'Mute playback'}
-                >
-                  {masterMuted ? (
-                    <VolumeX className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
-                  ) : (
-                    <Volume2 className="w-3.5 h-3.5" />
-                  )}
-                </button>
-              </div>
-
-              {totalDuration > 0 && (
-                <input
-                  type="range"
-                  min={0}
-                  max={totalDuration}
-                  step={0.05}
-                  value={Math.min(playhead, totalDuration)}
-                  onChange={(e) => onSeekPlayhead(Number(e.target.value))}
-                  className="studio-slider w-full"
-                  title="Scrub timeline to audition music, transitions & audio meters"
-                />
-              )}
-
-              <AudioMeterBar
-                leftDb={meter.leftDb}
-                rightDb={meter.rightDb}
-                orientation="horizontal"
-                label="Master L/R"
-                muted={masterMuted}
-                clipping={meter.clipping}
-              />
-
-              <AudioSpectrumVisualizer
-                tracks={tracks}
-                clips={clips}
-                playhead={playhead}
-                isPlaying={isPlaying}
-                masterMuted={masterMuted}
-                normalizeAudio={Boolean(exportConfig.normalizeAudio)}
-                normalizeTargetLufs={exportConfig.normalizeTargetLufs ?? -14}
-                compact
-                bandCount={28}
-                heightClass="h-12"
-                title="Master Audio Spectrum"
-              />
-
-              <button
-                type="button"
-                disabled={audioClipCount === 0 || isWorking}
-                onClick={normalizeAllAudioClips}
-                className="w-full py-1.5 px-3 rounded bg-blue-50 dark:bg-[#162030] hover:bg-blue-100 dark:hover:bg-blue-600/30 disabled:opacity-40 border border-blue-300 dark:border-blue-500/40 text-xs font-medium text-blue-800 dark:text-blue-200 cursor-pointer transition-colors"
-              >
-                Auto-Level All {audioClipCount} Audio Clip{audioClipCount === 1 ? '' : 's'}
-              </button>
-            </div>
+            <button
+              type="button"
+              disabled={audioClipCount === 0 || isWorking}
+              onClick={normalizeAllAudioClips}
+              className="w-full py-1.5 px-3 rounded bg-blue-50 dark:bg-[#162030] hover:bg-blue-100 dark:hover:bg-blue-600/30 disabled:opacity-40 border border-blue-300 dark:border-blue-500/40 text-xs font-medium text-blue-800 dark:text-blue-200 cursor-pointer transition-colors"
+            >
+              Auto-Level All {audioClipCount} Audio Clip{audioClipCount === 1 ? '' : 's'}
+            </button>
           </div>
 
-          <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+          <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer select-none pt-1">
             <input
               type="checkbox"
               checked={exportConfig.autoDownload}
@@ -682,7 +624,7 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
           <div className="flex items-center gap-2">
             <Film className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              Live Playback (Music &amp; Transitions) + Direct Render
+              Live Playback, Spectrum &amp; Direct Render
             </h2>
           </div>
           <div className="flex items-center gap-3 text-xs font-mono-tabular text-slate-500 dark:text-slate-400">
@@ -699,9 +641,29 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
           </div>
         </div>
 
-        <div className="p-4 flex-1 flex flex-col justify-between gap-3 overflow-y-auto">
+        <div className="p-4 flex-1 flex flex-col justify-between gap-3.5 overflow-y-auto">
           {clips.length === 0 ? (
-            <div className="flex-1 min-h-[300px] rounded border border-dashed border-slate-300 dark:border-[#2b3342] bg-slate-50 dark:bg-[#0d1016] p-6 flex flex-col items-center justify-center text-center gap-3">
+            <div
+              onDragOver={(e) => {
+                if (e.dataTransfer.types.includes('Files')) {
+                  e.preventDefault();
+                  setDropActive(true);
+                }
+              }}
+              onDragLeave={() => setDropActive(false)}
+              onDrop={(e) => {
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                  e.preventDefault();
+                  setDropActive(false);
+                  onUploadFiles(e.dataTransfer.files);
+                }
+              }}
+              className={`flex-1 min-h-[320px] rounded-md border border-dashed p-6 flex flex-col items-center justify-center text-center gap-3.5 transition-colors ${
+                dropActive
+                  ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/25'
+                  : 'border-slate-300 dark:border-[#2b3342] bg-slate-50 dark:bg-[#0d1016]'
+              }`}
+            >
               <input
                 ref={fileInputRef}
                 type="file"
@@ -716,59 +678,44 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
                 }}
               />
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                1-Click Auto-Select &amp; Quick Render
+                Drop Media or Load Sample Assets
               </h3>
               <p className="text-xs text-slate-600 dark:text-slate-400 max-w-md leading-relaxed">
-                Click &ldquo;Auto-Select Everything&rdquo; to automatically pick media, transitions, opacity fades, and playback music (or load the 120 BPM sample pack if your Media Bin is empty).
+                Upload photos, videos, or music tracks here—or click <strong className="font-semibold">Auto-Select &amp; Play Music</strong> in the setup panel to build a beat-synced edit instantly.
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
                 <button
                   type="button"
                   disabled={loadingSample || uploading}
-                  onClick={() => onAutoSelectQuickRender(syncedAutoOpts, false)}
+                  onClick={onLoadSamplePack}
                   className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                 >
                   {loadingSample ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   ) : (
-                    <Wand2 className="w-3.5 h-3.5" />
+                    <FolderPlus className="w-3.5 h-3.5" />
                   )}
-                  <span>
-                    {loadingSample
-                      ? 'Auto-Building Project...'
-                      : visualAssets.length > 0
-                        ? 'Auto-Select Everything & Preview'
-                        : 'Auto-Select Sample Pack & Play'}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  disabled={loadingSample || uploading}
-                  onClick={onLoadSamplePack}
-                  className="px-3.5 py-2 rounded bg-slate-200 dark:bg-[#1b2029] hover:bg-slate-300 dark:hover:bg-[#252c38] border border-slate-300 dark:border-[#2f3746] disabled:opacity-50 text-slate-800 dark:text-slate-100 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
-                >
-                  <FolderPlus className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                  <span>Load Sample Pack</span>
+                  <span>Load Sample Pack (120 BPM)</span>
                 </button>
                 <button
                   type="button"
                   disabled={uploading}
                   onClick={() => fileInputRef.current?.click()}
-                  className="px-3.5 py-2 rounded bg-slate-200 dark:bg-[#1b2029] hover:bg-slate-300 dark:hover:bg-[#252c38] border border-slate-300 dark:border-[#2f3746] disabled:opacity-50 text-slate-800 dark:text-slate-100 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
+                  className="px-4 py-2 rounded bg-white dark:bg-[#1b2029] hover:bg-slate-100 dark:hover:bg-[#252c38] border border-slate-300 dark:border-[#2f3746] disabled:opacity-50 text-slate-800 dark:text-slate-100 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
                 >
                   {uploading ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
                   ) : (
                     <Upload className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                   )}
-                  <span>{uploading ? 'Uploading...' : 'Upload Media'}</span>
+                  <span>{uploading ? 'Uploading...' : 'Upload Your Media'}</span>
                 </button>
               </div>
             </div>
           ) : (
-            <div className="flex-1 flex flex-col gap-3">
-              {/* Live Audio + Transition + Opacity Preview Stage */}
-              <div className="h-[260px] sm:h-[290px] flex flex-col">
+            <div className="flex-1 flex flex-col gap-3.5">
+              {/* Live Audio + Transition + Opacity + Spectrum Preview Stage */}
+              <div className="h-[310px] sm:h-[360px] flex flex-col">
                 <PreviewCanvas
                   tracks={tracks}
                   clips={clips}
@@ -785,6 +732,7 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
                   normalizeTargetLufs={exportConfig.normalizeTargetLufs ?? -14}
                   loadingSample={loadingSample}
                   uploading={uploading}
+                  defaultShowSpectrum
                   onPlayheadChange={onPlayheadChange}
                   onSelectClip={onSelectClip}
                   onUpdateClip={onUpdateClip}
@@ -793,12 +741,35 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
                   onToggleMute={onToggleMasterMute}
                   onLoadSamplePack={onLoadSamplePack}
                   onUploadFiles={onUploadFiles}
-                  onOpenTutorial={onOpenTutorial}
                 />
               </div>
 
+              {/* Dedicated Scrubber Strip */}
+              {totalDuration > 0 && (
+                <div className="px-3.5 py-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-200 dark:border-[#232935] flex items-center gap-3">
+                  <span className="text-[11px] font-mono-tabular text-slate-700 dark:text-slate-300 shrink-0">
+                    {formatTimecode(playhead)} / {formatTimecode(totalDuration)}
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={totalDuration}
+                    step={0.05}
+                    value={Math.min(playhead, totalDuration)}
+                    onChange={(e) => onSeekPlayhead(Number(e.target.value))}
+                    className="studio-slider flex-1"
+                    title="Scrub timeline to inspect transitions, opacity & audio meters"
+                  />
+                  <span className="text-[11px] font-mono-tabular text-emerald-700 dark:text-emerald-300 shrink-0">
+                    {masterMuted || meter.estimatedLufs <= -58
+                      ? '-∞ LUFS'
+                      : `${meter.estimatedLufs.toFixed(1)} LUFS`}
+                  </span>
+                </div>
+              )}
+
               {/* Summary Strip + Primary Render Button */}
-              <div className="p-3 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-200 dark:border-[#252b36] flex flex-wrap items-center justify-between gap-3">
+              <div className="p-3.5 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-200 dark:border-[#252b36] flex flex-wrap items-center justify-between gap-3">
                 <div className="space-y-0.5">
                   <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">
                     Ready to Render · {exportConfig.resolution.replace('x', '×')} @ {exportConfig.fps} fps (
@@ -894,15 +865,27 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
                           {renderJob.outputName} · {formatBytes(renderJob.outputSize || 0)} ·{' '}
                           {((renderJob.elapsedMs || 0) / 1000).toFixed(1)}s render time
                         </span>
-                        <a
-                          href={`/api/render/${renderJob.jobId}/download`}
-                          download={renderJob.outputName}
-                          className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5"
+                        <button
+                          type="button"
+                          disabled={downloadingPct !== null}
+                          onClick={handleDownloadFile}
+                          className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                         >
-                          <Download className="w-3.5 h-3.5" />
-                          <span>Download Video File</span>
-                        </a>
+                          {downloadingPct !== null ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Download className="w-3.5 h-3.5" />
+                          )}
+                          <span>
+                            {downloadingPct !== null
+                              ? `Downloading ${downloadingPct}%...`
+                              : 'Download Video File'}
+                          </span>
+                        </button>
                       </div>
+                      {downloadErr && (
+                        <p className="text-xs text-red-600 dark:text-red-400">{downloadErr}</p>
+                      )}
                     </div>
                   ) : (
                     !isFailed && (

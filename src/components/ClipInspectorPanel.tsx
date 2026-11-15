@@ -686,30 +686,6 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
               onToggle={() => toggleSection('audio')}
             >
               <div className="space-y-3">
-                {/* Quick Music Cuts & Actions */}
-                <div className="grid grid-cols-2 gap-1.5">
-                  {onSplitAtPlayhead && (
-                    <button
-                      type="button"
-                      onClick={onSplitAtPlayhead}
-                      className="px-2 py-1.5 rounded bg-slate-100 hover:bg-blue-50 dark:bg-[#1a212d] dark:hover:bg-blue-600/30 border border-slate-300 dark:border-[#2c3442] text-[10px] font-medium text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1 cursor-pointer"
-                    >
-                      <Scissors className="w-3 h-3 text-blue-500 dark:text-blue-400" />
-                      <span>Cut @ Playhead</span>
-                    </button>
-                  )}
-                  {onDuplicateClip && (
-                    <button
-                      type="button"
-                      onClick={() => onDuplicateClip(selectedClip.id)}
-                      className="px-2 py-1.5 rounded bg-slate-100 hover:bg-emerald-50 dark:bg-[#1a212d] dark:hover:bg-emerald-600/30 border border-slate-300 dark:border-[#2c3442] text-[10px] font-medium text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1 cursor-pointer"
-                    >
-                      <Copy className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                      <span>Loop / Repeat</span>
-                    </button>
-                  )}
-                </div>
-
                 {/* Background Music (BGM) Presets & Auto-Ducking */}
                 <div>
                   <span className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 font-semibold block mb-1">

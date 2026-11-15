@@ -1243,6 +1243,92 @@ export function nudgeClipSlip(clips: TimelineClip[], clipId: string, deltaSec: n
   });
 }
 
+/** Ripple edit: trim clipA out-point and ripple-shift all subsequent clips on the same track. */
+export function nudgeClipRipple(clips: TimelineClip[], clipId: string, deltaSec: number): TimelineClip[] {
+  const target = clips.find((c) => c.id === clipId);
+  if (!target || Math.abs(deltaSec) < 0.001) return clips;
+  let maxDur = Number.POSITIVE_INFINITY;
+  if ((target.kind === 'video' || target.kind === 'audio') && target.maxSourceDuration) {
+    maxDur = Math.max(0.25, (target.maxSourceDuration - target.trimStart) / Math.max(0.05, target.speed));
+  }
+  const nextDur = Number(Math.max(0.25, Math.min(maxDur, target.duration + deltaSec)).toFixed(3));
+  const actualDelta = nextDur - target.duration;
+  if (Math.abs(actualDelta) < 0.001) return clips;
+
+  return normalizeTimelineTransitions(
+    clips.map((c) => {
+      if (c.id === clipId) {
+        return { ...c, duration: nextDur };
+      }
+      if (c.trackId === target.trackId && c.startTime > target.startTime) {
+        return {
+          ...c,
+          startTime: Number(Math.max(0, c.startTime + actualDelta).toFixed(3)),
+        };
+      }
+      return c;
+    }),
+  );
+}
+
+/** Slide edit: move clipA in time between its outgoing neighbor and incoming clipB without altering clipA duration or trimStart. */
+export function nudgeClipSlide(
+  clips: TimelineClip[],
+  clipAId: string,
+  clipBId: string | null,
+  deltaSec: number,
+): TimelineClip[] {
+  const clipA = clips.find((c) => c.id === clipAId);
+  if (!clipA || Math.abs(deltaSec) < 0.001) return clips;
+
+  const sameTrack = clips
+    .filter((c) => c.trackId === clipA.trackId)
+    .sort((a, b) => a.startTime - b.startTime);
+  const idx = sameTrack.findIndex((c) => c.id === clipAId);
+  const prevClip = idx > 0 ? sameTrack[idx - 1] : null;
+  const nextClip = clipBId
+    ? clips.find((c) => c.id === clipBId) || null
+    : idx >= 0 && idx + 1 < sameTrack.length
+      ? sameTrack[idx + 1]
+      : null;
+
+  let minD = prevClip ? -(prevClip.duration - 0.25) : -clipA.startTime;
+  let maxD = nextClip ? nextClip.duration - 0.25 : 30;
+  if (prevClip && (prevClip.kind === 'video' || prevClip.kind === 'audio') && prevClip.maxSourceDuration) {
+    const avail = (prevClip.maxSourceDuration - prevClip.trimStart) / Math.max(0.05, prevClip.speed) - prevClip.duration;
+    maxD = Math.min(maxD, Math.max(0, avail));
+  }
+  if (nextClip && (nextClip.kind === 'video' || nextClip.kind === 'audio')) {
+    minD = Math.max(minD, -nextClip.trimStart / Math.max(0.05, nextClip.speed));
+  }
+  const d = Math.max(minD, Math.min(maxD, deltaSec));
+  if (Math.abs(d) < 0.001) return clips;
+
+  return normalizeTimelineTransitions(
+    clips.map((c) => {
+      if (prevClip && c.id === prevClip.id) {
+        return { ...c, duration: Number((c.duration + d).toFixed(3)) };
+      }
+      if (c.id === clipAId) {
+        return { ...c, startTime: Number(Math.max(0, c.startTime + d).toFixed(3)) };
+      }
+      if (nextClip && c.id === nextClip.id) {
+        const nextTrim =
+          c.kind === 'video' || c.kind === 'audio'
+            ? Number(Math.max(0, c.trimStart + d * c.speed).toFixed(3))
+            : c.trimStart;
+        return {
+          ...c,
+          startTime: Number(Math.max(0, c.startTime + d).toFixed(3)),
+          duration: Number(Math.max(0.25, c.duration - d).toFixed(3)),
+          trimStart: nextTrim,
+        };
+      }
+      return c;
+    }),
+  );
+}
+
 /** Extract/Ripple-remove an In..Out time range across unlocked clips. */
 export function extractTimelineRange(
   clips: TimelineClip[],

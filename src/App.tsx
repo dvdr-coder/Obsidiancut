@@ -13,6 +13,7 @@ import { QuickRenderPage } from './components/QuickRenderPage';
 import { TimelineEditor } from './components/TimelineEditor';
 import { TransitionLibraryPanel } from './components/TransitionLibraryPanel';
 import { TutorialModal } from './components/TutorialModal';
+import { downloadRenderedVideo } from './utils/downloadFile';
 import {
   ColorGradeConfig,
   DEFAULT_COLOR_GRADE,
@@ -40,7 +41,9 @@ import {
   createTitleClip,
   extractTimelineRange,
   normalizeTimelineTransitions,
+  nudgeClipRipple,
   nudgeClipRoll,
+  nudgeClipSlide,
   nudgeClipSlip,
   QuickAutoSelectOptions,
   resolveFfmpegXfadeFilter,
@@ -258,12 +261,13 @@ export default function App() {
           autoDownloadedJobRef.current !== nextJob.jobId
         ) {
           autoDownloadedJobRef.current = nextJob.jobId;
-          const a = document.createElement('a');
-          a.href = `/api/render/${nextJob.jobId}/download`;
-          a.download = nextJob.outputName || `obsidiancut_export.${exportConfig.format}`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
+          const outName = nextJob.outputName || `obsidiancut_export.${exportConfig.format}`;
+          const dlRes = await downloadRenderedVideo(nextJob.jobId, outName);
+          if (dlRes.ok) {
+            notify(`Render complete — downloading ${outName}`);
+          } else {
+            notify('Render complete — click Save Video to download');
+          }
         }
       } catch {
         // transient network error; continue polling
@@ -383,9 +387,11 @@ export default function App() {
         e.preventDefault();
         commitHistory();
         setClips((prev) =>
-          rippleMode
-            ? rippleDeleteClipFromList(prev, selectedClipId)
-            : prev.filter((c) => c.id !== selectedClipId),
+          normalizeTimelineTransitions(
+            rippleMode
+              ? rippleDeleteClipFromList(prev, selectedClipId)
+              : prev.filter((c) => c.id !== selectedClipId),
+          ),
         );
         setSelectedClipId(null);
         notify(rippleMode ? 'Ripple deleted clip' : 'Removed clip');
@@ -475,7 +481,7 @@ export default function App() {
       }
       commitHistory();
       setAssets((prev) => prev.filter((a) => a.id !== id));
-      setClips((prev) => prev.filter((c) => c.mediaId !== id));
+      setClips((prev) => normalizeTimelineTransitions(prev.filter((c) => c.mediaId !== id)));
       notify('Media asset removed');
     } catch (err) {
       setErrorBanner((err as Error).message || 'Could not remove media asset');
@@ -606,7 +612,7 @@ export default function App() {
       setIsPlaying(false);
       commitHistory();
       setTracks(parsed.tracks);
-      setClips(parsed.clips);
+      setClips(normalizeTimelineTransitions(parsed.clips));
       if (parsed.colorGrade) setColorGrade(parsed.colorGrade);
       if (parsed.assetColorGrades && typeof parsed.assetColorGrades === 'object') {
         setAssets((prev) =>
@@ -615,7 +621,9 @@ export default function App() {
           ),
         );
       }
-      if (parsed.exportConfig) setExportConfig(parsed.exportConfig);
+      if (parsed.exportConfig && typeof parsed.exportConfig === 'object') {
+        setExportConfig((prev) => ({ ...prev, ...parsed.exportConfig }));
+      }
       setPlayhead(0);
       setSelectedClipId(null);
       notify(`Loaded "${file.name}"`);
@@ -779,6 +787,12 @@ export default function App() {
     } else if (trimMode === 'roll' && clipBId) {
       setClips((prev) => nudgeClipRoll(prev, clipAId, clipBId, dt));
       notify(`Rolled A/B cut point by ${deltaFrames}f`);
+    } else if (trimMode === 'ripple') {
+      setClips((prev) => nudgeClipRipple(prev, clipAId, dt));
+      notify(`Ripple trimmed clip by ${deltaFrames}f`);
+    } else if (trimMode === 'slide') {
+      setClips((prev) => nudgeClipSlide(prev, clipAId, clipBId, dt));
+      notify(`Slid clip position by ${deltaFrames}f`);
     } else {
       setClips((prev) =>
         normalizeTimelineTransitions(
@@ -954,7 +968,9 @@ export default function App() {
   const handleDeleteClip = (id: string) => {
     commitHistory();
     setClips((prev) =>
-      rippleMode ? rippleDeleteClipFromList(prev, id) : prev.filter((c) => c.id !== id),
+      normalizeTimelineTransitions(
+        rippleMode ? rippleDeleteClipFromList(prev, id) : prev.filter((c) => c.id !== id),
+      ),
     );
     if (selectedClipId === id) setSelectedClipId(null);
     notify(rippleMode ? 'Ripple deleted clip' : 'Removed clip');
@@ -1111,8 +1127,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#f1f5f9] dark:bg-[#0d0f12] text-slate-900 dark:text-slate-100">
-      {/* Three-Zone Top Bar */}
-      <header className="h-[52px] px-5 border-b border-slate-200 dark:border-[#222732] bg-white dark:bg-[#12151a] flex items-center justify-between gap-6 shrink-0">
+      {/* Clean Two-Zone App Header */}
+      <header className="h-[52px] px-4 sm:px-5 border-b border-slate-200 dark:border-[#222732] bg-white dark:bg-[#12151a] flex items-center justify-between gap-4 shrink-0">
         <a
           href="/"
           className="flex items-center gap-2.5 text-lg font-bold tracking-tight text-slate-900 dark:text-white font-display whitespace-nowrap shrink-0"
@@ -1133,69 +1149,15 @@ export default function App() {
           <span>Obsidian Cut</span>
         </a>
 
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium">
-          <button
-            type="button"
-            onClick={() => setMode('auto')}
-            className={`transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              mode === 'auto'
-                ? 'text-slate-900 dark:text-white underline underline-offset-8 decoration-blue-500'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-            }`}
-          >
-            Auto Sync
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('manual')}
-            className={`transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              mode === 'manual'
-                ? 'text-slate-900 dark:text-white underline underline-offset-8 decoration-blue-500'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-            }`}
-          >
-            Endless Workspace
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('advanced')}
-            className={`transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              mode === 'advanced'
-                ? 'text-slate-900 dark:text-white underline underline-offset-8 decoration-blue-500'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-            }`}
-          >
-            Advanced Studio
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('quickrender')}
-            className={`transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              mode === 'quickrender'
-                ? 'text-slate-900 dark:text-white underline underline-offset-8 decoration-emerald-500 dark:decoration-emerald-400'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-            }`}
-          >
-            Quick Render
-          </button>
+        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
           <button
             type="button"
             onClick={() => setTutorialOpen(true)}
-            className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-colors whitespace-nowrap shrink-0 cursor-pointer flex items-center gap-1.5"
+            className="px-2.5 py-1.5 rounded bg-slate-100 dark:bg-[#1a1e26] hover:bg-slate-200 dark:hover:bg-[#232934] border border-slate-300 dark:border-[#2c3340] text-slate-700 dark:text-slate-200 text-xs font-medium flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <BookOpen className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-            <span>Tutorial</span>
+            <span className="hidden sm:inline">Tutorial</span>
           </button>
-          <button
-            type="button"
-            onClick={() => setExportModalOpen(true)}
-            className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            Export Settings
-          </button>
-        </nav>
-
-        <div className="flex items-center gap-2.5 shrink-0">
           <button
             type="button"
             onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
@@ -1218,8 +1180,8 @@ export default function App() {
           <button
             type="button"
             onClick={() => setExportModalOpen(true)}
-            disabled={clips.length === 0}
-            className="px-4 py-1.5 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            title="Configure export settings & render high-definition video"
+            className="px-3.5 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Export HD</span>
@@ -1252,71 +1214,96 @@ export default function App() {
           <button
             type="button"
             onClick={() => setExportModalOpen(true)}
-            className="text-blue-700 dark:text-blue-300 hover:text-blue-950 dark:hover:text-white font-medium whitespace-nowrap"
+            className="text-blue-700 dark:text-blue-300 hover:text-blue-950 dark:hover:text-white font-medium whitespace-nowrap cursor-pointer"
           >
             View Progress
           </button>
         </div>
       )}
 
-      <main className="flex-1 p-3 flex flex-col gap-3 min-h-0">
-        {/* Workspace Mode Switcher + Project Utilities + Auto Studio Controls */}
+      {!exportModalOpen && mode !== 'quickrender' && renderJob?.status === 'completed' && (
+        <div className="px-5 py-2 bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200 dark:border-emerald-800/50 text-xs flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-emerald-900 dark:text-emerald-200">
+            <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            <span>
+              Render complete ({renderJob.outputName} ·{' '}
+              {((renderJob.elapsedMs || 0) / 1000).toFixed(1)}s)
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={async () => {
+                const outName =
+                  renderJob.outputName || `obsidiancut_export.${exportConfig.format}`;
+                const res = await downloadRenderedVideo(renderJob.jobId, outName);
+                if (res.ok) notify(`Saved ${outName}`);
+                else setErrorBanner(res.error || 'Download failed');
+              }}
+              className="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1.5 cursor-pointer"
+            >
+              <Download className="w-3 h-3" />
+              <span>Save Video</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setExportModalOpen(true)}
+              className="text-emerald-800 dark:text-emerald-300 hover:underline font-medium cursor-pointer"
+            >
+              Watch / Details
+            </button>
+          </div>
+        </div>
+      )}
+
+      <main className="flex-1 p-3 sm:p-4 flex flex-col gap-3.5 min-h-0">
+        {/* Single Unified Workspace Mode Switcher + Project Utilities */}
         <div className="flex flex-col gap-2.5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex items-center gap-1 p-1 bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-md">
-                <button
-                  type="button"
-                  onClick={() => setMode('auto')}
-                  className={`px-3 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    mode === 'auto'
-                      ? 'bg-blue-600 text-white'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
-                  }`}
-                >
-                  Auto Mode (Beat Sync)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMode('manual')}
-                  className={`px-3 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    mode === 'manual'
-                      ? 'bg-blue-600 text-white'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
-                  }`}
-                >
-                  Endless Workspace (Boundless Tracks)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMode('advanced')}
-                  className={`px-3 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    mode === 'advanced'
-                      ? 'bg-blue-600 text-white'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
-                  }`}
-                >
-                  Advanced Mode (Fusion · Fairlight · MultiMaster)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMode('quickrender')}
-                  className={`px-3 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    mode === 'quickrender'
-                      ? 'bg-emerald-600 text-white'
-                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
-                  }`}
-                >
-                  Quick Render
-                </button>
-              </div>
+            <div className="inline-flex flex-wrap items-center gap-1 p-1 bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg max-w-full">
               <button
                 type="button"
-                onClick={() => setTutorialOpen(true)}
-                className="md:hidden px-2.5 py-1.5 rounded bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                onClick={() => setMode('auto')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  mode === 'auto'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                }`}
               >
-                <BookOpen className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                <span>Tutorial</span>
+                Auto Sync
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('manual')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  mode === 'manual'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                }`}
+              >
+                Endless Workspace
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('advanced')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  mode === 'advanced'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                }`}
+              >
+                Advanced Studio
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('quickrender')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  mode === 'quickrender'
+                    ? 'bg-emerald-600 text-white'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                }`}
+              >
+                Quick Render
               </button>
             </div>
 
@@ -1339,18 +1326,18 @@ export default function App() {
                 onClick={handleSaveProject}
                 disabled={clips.length === 0}
                 title="Download timeline project as JSON"
-                className="px-2.5 py-1 rounded bg-white dark:bg-[#14171d] hover:bg-slate-100 dark:hover:bg-[#1e2430] border border-slate-200 dark:border-[#232832] disabled:opacity-40 text-xs text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
+                className="px-2.5 py-1.5 rounded bg-white dark:bg-[#14171d] hover:bg-slate-100 dark:hover:bg-[#1e2430] border border-slate-200 dark:border-[#232832] disabled:opacity-40 text-xs text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
-                <Save className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                <Save className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                 <span>Save</span>
               </button>
               <button
                 type="button"
                 onClick={() => projectInputRef.current?.click()}
                 title="Load saved project JSON"
-                className="px-2.5 py-1 rounded bg-white dark:bg-[#14171d] hover:bg-slate-100 dark:hover:bg-[#1e2430] border border-slate-200 dark:border-[#232832] text-xs text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
+                className="px-2.5 py-1.5 rounded bg-white dark:bg-[#14171d] hover:bg-slate-100 dark:hover:bg-[#1e2430] border border-slate-200 dark:border-[#232832] text-xs text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
-                <FolderOpen className="w-3 h-3 text-slate-500 dark:text-slate-400" />
+                <FolderOpen className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
                 <span>Load</span>
               </button>
               {clips.length > 0 && (
@@ -1358,13 +1345,13 @@ export default function App() {
                   type="button"
                   onClick={handleClearTimeline}
                   title="Clear all clips from the timeline (Ctrl+Z to undo)"
-                  className={`px-2.5 py-1 rounded border text-xs flex items-center gap-1 transition-colors whitespace-nowrap shrink-0 ${
+                  className={`px-2.5 py-1.5 rounded border text-xs flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     confirmClear
                       ? 'bg-red-600/15 dark:bg-red-600/20 border-red-500 text-red-700 dark:text-red-200 font-medium'
                       : 'bg-white dark:bg-[#14171d] hover:bg-red-50 dark:hover:bg-[#1e2430] border-slate-200 dark:border-[#232832] text-slate-600 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-300'
                   }`}
                 >
-                  <Trash2 className="w-3 h-3" />
+                  <Trash2 className="w-3.5 h-3.5" />
                   <span>{confirmClear ? 'Confirm Clear?' : 'Clear'}</span>
                 </button>
               )}
@@ -1376,7 +1363,6 @@ export default function App() {
               visualAssets={visualAssets}
               audioAssets={audioAssets}
               onAutoAssemble={handleAutoAssemble}
-              onLoadSamplePack={handleLoadSamplePack}
             />
           )}
 
@@ -1496,7 +1482,7 @@ export default function App() {
               onSwitchMulticamAngle={handleSwitchMulticamAngle}
             />
           ) : (
-            <div className="flex flex-col lg:flex-row gap-3 min-h-[380px] lg:h-[445px]">
+            <div className="flex flex-col lg:flex-row gap-3.5 min-h-[380px] lg:h-[445px]">
               <div className="w-full lg:w-[340px] shrink-0 bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg overflow-hidden flex flex-col">
                 <TransitionLibraryPanel
                   selectedTransition={
@@ -1549,7 +1535,6 @@ export default function App() {
                   onToggleMute={() => setMasterMuted((m) => !m)}
                   onLoadSamplePack={handleLoadSamplePack}
                   onUploadFiles={handleUploadFiles}
-                  onOpenTutorial={() => setTutorialOpen(true)}
                 />
               </div>
             </div>
@@ -1594,11 +1579,10 @@ export default function App() {
             onLoadSamplePack={handleLoadSamplePack}
             onUploadFiles={handleUploadFiles}
             onOpenTimelineMode={() => setMode('manual')}
-            onOpenTutorial={() => setTutorialOpen(true)}
             onAutoSelectQuickRender={handleAutoSelectQuickRender}
           />
         ) : (
-        <div className="flex flex-col lg:flex-row gap-3 min-h-[360px] lg:h-[445px]">
+        <div className="flex flex-col lg:flex-row gap-3.5 min-h-[360px] lg:h-[445px]">
           <MediaBin
             assets={assets}
             uploading={uploading}
@@ -1653,7 +1637,6 @@ export default function App() {
               onToggleMute={() => setMasterMuted((m) => !m)}
               onLoadSamplePack={handleLoadSamplePack}
               onUploadFiles={handleUploadFiles}
-              onOpenTutorial={() => setTutorialOpen(true)}
             />
           </div>
 

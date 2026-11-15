@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AudioLines,
-  BookOpen,
   ChevronLeft,
   ChevronRight,
   Crop,
@@ -66,6 +65,7 @@ interface PreviewCanvasProps {
   normalizeTargetLufs?: number;
   loadingSample?: boolean;
   uploading?: boolean;
+  defaultShowSpectrum?: boolean;
   onPlayheadChange: (t: number) => void;
   onTogglePlay: () => void;
   onToggleMute: () => void;
@@ -75,7 +75,6 @@ interface PreviewCanvasProps {
   onCanvasToolChange?: (tool: 'resize' | 'crop') => void;
   onLoadSamplePack?: () => void;
   onUploadFiles?: (files: FileList | File[]) => void;
-  onOpenTutorial?: () => void;
 }
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -311,6 +310,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   normalizeTargetLufs = -14,
   loadingSample = false,
   uploading = false,
+  defaultShowSpectrum = false,
   onPlayheadChange,
   onTogglePlay,
   onToggleMute,
@@ -320,7 +320,6 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   onCanvasToolChange,
   onLoadSamplePack,
   onUploadFiles,
-  onOpenTutorial,
 }) => {
   const emptyUploadRef = useRef<HTMLInputElement | null>(null);
   const stageViewportRef = useRef<HTMLDivElement | null>(null);
@@ -332,7 +331,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
     onCanvasToolChange?.(next);
   };
   const [emptyDropActive, setEmptyDropActive] = useState(false);
-  const [showSpectrum, setShowSpectrum] = useState(false);
+  const [showSpectrum, setShowSpectrum] = useState(defaultShowSpectrum);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const chromaCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const trackBufferCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1517,19 +1516,6 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
               <span>2. Auto-sync or edit tracks</span>
               <span aria-hidden="true">·</span>
               <span>3. Export HD</span>
-              {onOpenTutorial && (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <button
-                    type="button"
-                    onClick={onOpenTutorial}
-                    className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 inline-flex items-center gap-1 cursor-pointer"
-                  >
-                    <BookOpen className="w-3 h-3" />
-                    <span>Walkthrough</span>
-                  </button>
-                </>
-              )}
             </div>
           </div>
         ) : (

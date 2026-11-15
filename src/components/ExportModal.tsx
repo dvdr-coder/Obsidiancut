@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { CheckCircle2, Download, Loader2, Minimize2, X, AlertCircle } from 'lucide-react';
 import { ExportConfig, ExportFps, RenderJobStatus } from '../types/editor';
+import { downloadRenderedVideo } from '../utils/downloadFile';
 import { formatBytes } from '../utils/timelineMath';
 
 interface ExportModalProps {
@@ -24,11 +25,26 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   onStartRender,
   onClose,
 }) => {
+  const [downloadingPct, setDownloadingPct] = useState<number | null>(null);
+  const [downloadErr, setDownloadErr] = useState<string | null>(null);
+
   if (!isOpen) return null;
 
   const isWorking = job?.status === 'queued' || job?.status === 'rendering';
   const isDone = job?.status === 'completed';
   const isFailed = job?.status === 'failed';
+
+  const handleSaveFile = async () => {
+    if (!job || downloadingPct !== null) return;
+    setDownloadErr(null);
+    setDownloadingPct(0);
+    const outName = job.outputName || `obsidiancut_export.${config.format}`;
+    const res = await downloadRenderedVideo(job.jobId, outName, (pct) => setDownloadingPct(pct));
+    setDownloadingPct(null);
+    if (!res.ok) {
+      setDownloadErr(res.error || 'Download failed');
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 dark:bg-black/70 flex items-center justify-center p-4">
@@ -214,20 +230,30 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     controls
                     className="w-full max-h-44 rounded bg-black border border-slate-300 dark:border-[#232832]"
                   />
-                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
                     <span className="font-mono-tabular">
                       {job.outputName} · {formatBytes(job.outputSize || 0)} ·{' '}
                       {((job.elapsedMs || 0) / 1000).toFixed(1)}s
                     </span>
-                    <a
-                      href={`/api/render/${job.jobId}/download`}
-                      download={job.outputName}
-                      className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium flex items-center gap-1.5"
+                    <button
+                      type="button"
+                      disabled={downloadingPct !== null}
+                      onClick={handleSaveFile}
+                      className="px-3.5 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white font-medium flex items-center gap-1.5 cursor-pointer"
                     >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>Save File</span>
-                    </a>
+                      {downloadingPct !== null ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Download className="w-3.5 h-3.5" />
+                      )}
+                      <span>
+                        {downloadingPct !== null ? `Saving ${downloadingPct}%...` : 'Save File'}
+                      </span>
+                    </button>
                   </div>
+                  {downloadErr && (
+                    <p className="text-[11px] text-red-600 dark:text-red-400">{downloadErr}</p>
+                  )}
                 </div>
               )}
             </div>
