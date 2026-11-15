@@ -1,0 +1,147 @@
+# Obsidian Cut AutoEngine — Multi-Video HJSON Batch Example
+# Run directly from the repository root:
+#   python -m autoengine run autoengine/examples/batch_videos.hjson
+# Or validate / dry-run first:
+#   python -m autoengine validate autoengine/examples/batch_videos.hjson
+#   python -m autoengine run autoengine/examples/batch_videos.hjson --dry-run
+
+{
+  // Shared defaults inherited by every video job below
+  defaults: {
+    outputDir: autoengine/output
+    fps: 30
+    format: mp4
+    speedProfile: ultrafast
+    transitionStyle: dynamic
+    transitionDuration: 0.45
+    enableMotion: true
+    beatStride: 2
+  }
+
+  // Render up to 2 videos concurrently
+  workers: 2
+
+  videos: [
+    // 1) Beat-synced 16:9 HD slideshow with Teal & Orange grading + logo watermark
+    {
+      id: alpine_landscape_hd
+      output: alpine_landscape_hd.mp4
+      mode: auto
+      resolution: 1280x720
+      audio: sample:120bpm
+      maxDuration: 6.0
+      beatStride: 2
+      transitionStyle: dynamic
+      colorGrade: {
+        enabled: true
+        preset: cinematic_teal
+        vignette: 0.22
+      }
+      slides: [
+        src/assets/images/sample_alpine_dawn_1794555446401.jpg
+        {
+          path: src/assets/images/sample_coastal_highway_1794555446525.jpg
+          motion: panRight
+          transition: smoothleft
+        }
+        src/assets/images/sample_desert_dunes_1794555446781.jpg
+        src/assets/images/sample_tokyo_rain_1794555446926.jpg
+      ]
+      overlay: {
+        path: src/assets/images/obsidian_cut_logo_1794556840933.jpg
+        x: 38
+        y: -36
+        scale: 0.14
+        opacity: 0.85
+        fadeIn: 0.3
+        fadeOut: 0.3
+      }
+    }
+
+    // 2) Vertical 9:16 cinema 23.976 fps reel using glob expansion + Warm Kodak grading
+    {
+      id: vertical_social_reel
+      output: vertical_social_reel_9x16.mp4
+      mode: auto
+      resolution: 720x1280
+      fps: 23.976
+      audio: sample:128bpm
+      maxDuration: 5.0
+      beatStride: 1
+      transitionStyle: geometric
+      colorGrade: {
+        enabled: true
+        preset: kodak_warm
+        contrast: 1.08
+      }
+      slides: [
+        src/assets/images/sample_*.jpg
+      ]
+    }
+
+    // 3) Explicit multi-track HJSON timeline with Mono Noir grade, PiP layer & panned music
+    {
+      id: noir_multitrack_cut
+      output: noir_multitrack_cut.mp4
+      mode: timeline
+      resolution: 1280x720
+      fps: 24
+      colorGrade: {
+        enabled: true
+        preset: mono_noir
+      }
+      tracks: [
+        { id: v2, name: V2 Watermark, kind: video }
+        { id: v1, name: V1 Main, kind: video }
+        { id: a1, name: A1 Score, kind: audio }
+      ]
+      clips: [
+        {
+          trackId: v1
+          path: src/assets/images/sample_tokyo_rain_1794555446926.jpg
+          startTime: 0.0
+          duration: 2.2
+          motion: zoomIn
+          transitionOut: fadeblack
+          transitionDuration: 0.4
+          effects: {
+            contrast: 1.15
+          }
+        }
+        {
+          trackId: v1
+          path: src/assets/images/sample_alpine_dawn_1794555446401.jpg
+          startTime: 1.8
+          duration: 2.2
+          motion: panLeft
+          transitionOut: cut
+        }
+        {
+          trackId: v2
+          path: src/assets/images/obsidian_cut_logo_1794556840933.jpg
+          startTime: 0.2
+          duration: 3.6
+          fit: contain
+          scale: 0.16
+          x: -36
+          y: 34
+          rotation: -4
+          opacity: 0.9
+          fadeIn: 0.3
+          fadeOut: 0.3
+        }
+        {
+          trackId: a1
+          path: sample:110bpm
+          startTime: 0.0
+          duration: 4.0
+          speed: 1.1
+          volume: 0.85
+          pan: -0.15
+          fadeIn: 0.25
+          fadeOut: 0.5
+        }
+      ]
+    }
+  ]
+}

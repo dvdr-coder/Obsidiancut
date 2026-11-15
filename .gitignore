@@ -1,0 +1,7 @@
+node_modules/
+dist/
+dist-ssr/
+*.local
+.framecut_data/
+.obsidiancut_data/
+autoengine/output/

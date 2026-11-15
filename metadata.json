@@ -1,0 +1,6 @@
+{
+  "name": "Obsidian Cut",
+  "description": "High-speed multi-track video, slideshow, compositing, and audio editing studio powered by Python + FFmpeg with beat-synced auto assembly, sandboxed color grading plug-ins, proxy workflows, and HD/4K export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
