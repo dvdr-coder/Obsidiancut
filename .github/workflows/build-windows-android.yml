@@ -1,0 +1,201 @@
+name: Build Windows & Android
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Build Windows x64 Package
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Typecheck and build frontend
+        run: |
+          npm run lint
+          npm run build
+
+      - name: Verify Python engine syntax
+        run: python -m py_compile backend/engine.py
+
+      - name: Stage portable Windows desktop bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $PWD 'stage-win'
+          if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+          New-Item -ItemType Directory -Path $stage | Out-Null
+
+          # Bundle Express + Python supervisor gateway without devDependencies
+          npx esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=stage-win/dist-server/server.mjs
+
+          # Copy built SPA assets, Python engine, batch automation CLI, and Windows launchers
+          Copy-Item -Path 'dist' -Destination (Join-Path $stage 'dist') -Recurse -Force
+          Copy-Item -Path 'backend' -Destination (Join-Path $stage 'backend') -Recurse -Force
+          if (Test-Path 'autoengine') {
+            Copy-Item -Path 'autoengine' -Destination (Join-Path $stage 'autoengine') -Recurse -Force
+          }
+          Copy-Item -Path 'platforms/windows/*' -Destination $stage -Recurse -Force
+
+          # Install production-only Node dependencies for server.mjs
+          $pkg = Get-Content 'package.json' -Raw | ConvertFrom-Json
+          $prodPkg = [ordered]@{
+            name = 'obsidian-cut-desktop'
+            private = $true
+            version = $pkg.version
+            type = 'module'
+            scripts = @{
+              start = 'node dist-server/server.mjs --prod'
+            }
+            dependencies = [ordered]@{
+              '@google/genai' = $pkg.dependencies.'@google/genai'
+              dotenv = $pkg.dependencies.dotenv
+              express = $pkg.dependencies.express
+              multer = $pkg.dependencies.multer
+            }
+          }
+          $prodPkg | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $stage 'package.json') -Encoding UTF8
+
+          Push-Location $stage
+          npm install --omit=dev --legacy-peer-deps --no-audit --no-fund
+          Pop-Location
+
+          # Bundle portable Node.js executable
+          $nodeRuntimeDir = Join-Path $stage 'runtime\node'
+          New-Item -ItemType Directory -Path $nodeRuntimeDir -Force | Out-Null
+          Copy-Item -Path (Get-Command node).Source -Destination (Join-Path $nodeRuntimeDir 'node.exe') -Force
+
+          # Download portable FFmpeg essentials (graceful fallback if mirror unavailable)
+          $ffmpegBinDir = Join-Path $stage 'runtime\ffmpeg\bin'
+          New-Item -ItemType Directory -Path $ffmpegBinDir -Force | Out-Null
+          try {
+            $ffZip = Join-Path $env:RUNNER_TEMP 'ffmpeg-essentials.zip'
+            $ffExtract = Join-Path $env:RUNNER_TEMP 'ffmpeg-extract'
+            Invoke-WebRequest -Uri 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' -OutFile $ffZip -TimeoutSec 120
+            Expand-Archive -Path $ffZip -DestinationPath $ffExtract -Force
+            Get-ChildItem -Path $ffExtract -Recurse -Include 'ffmpeg.exe', 'ffprobe.exe' | ForEach-Object {
+              Copy-Item -Path $_.FullName -Destination (Join-Path $ffmpegBinDir $_.Name) -Force
+            }
+            Write-Host 'Bundled portable ffmpeg.exe and ffprobe.exe successfully.'
+          } catch {
+            Write-Warning "Could not download portable FFmpeg during CI build: $($_.Exception.Message)"
+          }
+
+          $outZip = Join-Path $PWD 'ObsidianCut-Windows-x64.zip'
+          if (Test-Path $outZip) { Remove-Item $outZip -Force }
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $outZip -CompressionLevel Optimal
+
+      - name: Upload Windows desktop artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ObsidianCut-Windows-x64
+          path: ObsidianCut-Windows-x64.zip
+          if-no-files-found: error
+
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install dependencies and build web bundle
+        run: |
+          npm install --legacy-peer-deps
+          npm run lint
+          npm run build
+
+      - name: Copy built web assets into Android WebView bundle
+        run: |
+          rm -rf platforms/android/app/src/main/assets/www
+          mkdir -p platforms/android/app/src/main/assets/www
+          cp -R dist/. platforms/android/app/src/main/assets/www/
+
+      - name: Accept Android SDK licenses
+        run: |
+          SDK_MANAGER="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+          if [ -x "$SDK_MANAGER" ]; then
+            yes | "$SDK_MANAGER" --licenses > /dev/null 2>&1 || true
+          fi
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Build Android APK
+        working-directory: platforms/android
+        run: gradle assembleDebug assembleRelease --no-daemon
+
+      - name: Collect APK artifacts
+        run: |
+          cp platforms/android/app/build/outputs/apk/debug/app-debug.apk ./ObsidianCut-Android.apk
+          if [ -f platforms/android/app/build/outputs/apk/release/app-release-unsigned.apk ]; then
+            cp platforms/android/app/build/outputs/apk/release/app-release-unsigned.apk ./ObsidianCut-Android-unsigned.apk
+          fi
+
+      - name: Upload Android APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ObsidianCut-Android-APK
+          path: ObsidianCut-Android*.apk
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-windows, build-android]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ObsidianCut-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Create GitHub Release with Windows & Android binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release-assets/*

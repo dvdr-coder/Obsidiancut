@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ObsidianCut" parent="Theme.AppCompat.DayNight.DarkActionBar">
+        <item name="colorPrimary">#111622</item>
+        <item name="colorPrimaryDark">#0B0D12</item>
+        <item name="colorAccent">#22D3EE</item>
+        <item name="android:windowBackground">#0B0D12</item>
+    </style>
+</resources>

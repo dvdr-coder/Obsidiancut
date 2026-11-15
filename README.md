@@ -17,7 +17,8 @@
 6. [Batch Automation with `autoengine` (HJSON CLI)](#batch-automation-with-autoengine-hjson-wrapper)
 7. [Keyboard & Mouse Shortcuts](#keyboard--mouse-shortcuts)
 8. [Installation & Setup (Windows, WSL, Linux)](#installation--setup-windows-wsl-and-linux)
-9. [API Endpoints Usage Guide](#api-endpoints-usage-guide)
+9. [GitHub Actions Builds (Windows Desktop & Android APK)](#github-actions-builds-windows-desktop--android-apk)
+10. [API Endpoints Usage Guide](#api-endpoints-usage-guide)
 
 ---
 
@@ -297,6 +298,19 @@ npm run start
 ### Cross-Platform Notes
 - `server.ts` automatically resolves Python across Windows (`PYTHON_BIN`, `python`, `py -3`, `python3`), WSL, and Linux, and handles both `SIGINT`/`SIGTERM` and Windows `SIGBREAK`.
 - Workspace uploads, proxies, and rendered exports are stored locally in `.obsidiancut_data/` (override with `OBSIDIANCUT_DATA_DIR`).
+
+---
+
+## GitHub Actions Builds (Windows Desktop & Android APK)
+
+A ready-to-run CI workflow in [`.github/workflows/build-windows-android.yml`](.github/workflows/build-windows-android.yml) builds downloadable packages on every push/PR to `main`/`master`, manual **Run workflow** dispatch, or `v*` release tag:
+
+- **Windows x64 (`ObsidianCut-Windows-x64.zip`)** — built on `windows-latest`:
+  - Bundles `server.ts` into `dist-server/server.mjs`, production Node modules, `dist/` frontend assets, `backend/engine.py`, portable `node.exe`, and portable `ffmpeg.exe` / `ffprobe.exe`.
+  - Double-click **`Start-ObsidianCut.bat`** inside the extracted ZIP to launch the backend and open Obsidian Cut in a standalone Microsoft Edge / Chrome desktop app window (`--app=http://127.0.0.1:3000`).
+- **Android APK (`ObsidianCut-Android.apk`)** — built on `ubuntu-latest` (`platforms/android/`):
+  - Packages the built web studio inside an Android WebView shell (`WebViewAssetLoader`) with multi-file media picker, download manager support, and an option in the top-right menu (**Connect PC / LAN Backend**) to link to your desktop Obsidian Cut server over Wi-Fi for full native FFmpeg exports.
+- **GitHub Releases (`v*` tags)**: Pushing a version tag such as `git tag v1.0.0 && git push origin v1.0.0` automatically attaches both binaries to a GitHub Release.
 
 ---
 

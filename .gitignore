@@ -5,3 +5,11 @@ dist-ssr/
 .framecut_data/
 .obsidiancut_data/
 autoengine/output/
+stage-win/
+dist-server/
+ObsidianCut-*.zip
+ObsidianCut-*.apk
+platforms/android/.gradle/
+platforms/android/build/
+platforms/android/app/build/
+platforms/android/app/src/main/assets/www/

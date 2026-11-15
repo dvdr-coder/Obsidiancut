@@ -5,7 +5,6 @@ import http from 'node:http';
 import path from 'node:path';
 import express, { Request, Response } from 'express';
 import multer from 'multer';
-import { createServer as createViteServer } from 'vite';
 
 const PORT = 3000;
 const PY_HOST = '127.0.0.1';
@@ -738,6 +737,7 @@ async function bootstrap() {
 
   const isProd = process.env.NODE_ENV === 'production' || process.argv.includes('--prod');
   if (!isProd) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
