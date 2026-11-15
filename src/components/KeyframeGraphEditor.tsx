@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
@@ -65,6 +65,12 @@ export const KeyframeGraphEditor: React.FC<KeyframeGraphEditorProps> = ({
   const [selectedKfId, setSelectedKfId] = useState<string | null>(null);
   const [defaultEasing, setDefaultEasing] = useState<KeyframeEasing>('easeInOut');
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const numCommittedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    setSelectedKfId(null);
+    numCommittedRef.current = false;
+  }, [clip?.id]);
 
   const meta = KEYFRAME_PROPERTY_META[activeProp];
   const dur = Math.max(0.2, clip?.duration ?? 4);
@@ -294,8 +300,8 @@ export const KeyframeGraphEditor: React.FC<KeyframeGraphEditorProps> = ({
 
   if (!clip) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-4 text-center gap-2 bg-[#0b0d12]">
-        <p className="text-xs font-medium text-slate-300">
+      <div className="flex-1 flex flex-col items-center justify-center p-4 text-center gap-2 bg-slate-50 dark:bg-[#0b0d12]">
+        <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
           Add or select a visual clip on the timeline to animate keyframes.
         </p>
         {visualClips.length > 0 && onSelectClip && (
@@ -318,7 +324,7 @@ export const KeyframeGraphEditor: React.FC<KeyframeGraphEditorProps> = ({
   return (
     <div className="flex-1 flex flex-col bg-[#0b0d12] min-h-0">
       {/* Top Toolbar: Clip Selector + Property Channels + Presets */}
-      <div className="px-3 py-1.5 bg-[#12161e] border-b border-[#232832] flex flex-wrap items-center justify-between gap-2">
+      <div className="px-3 py-1.5 bg-slate-50 dark:bg-[#12161e] border-b border-slate-200 dark:border-[#232832] flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
           {visualClips.length > 1 && onSelectClip && (
             <select
@@ -328,7 +334,7 @@ export const KeyframeGraphEditor: React.FC<KeyframeGraphEditorProps> = ({
                 setSelectedKfId(null);
                 onSelectClip(e.target.value);
               }}
-              className="h-6 px-2 rounded bg-[#0b0e13] border border-[#2a3140] text-[11px] text-slate-200 max-w-[140px]"
+              className="h-6 px-2 rounded bg-white dark:bg-[#0b0e13] border border-slate-300 dark:border-[#2a3140] text-[11px] text-slate-900 dark:text-slate-200 max-w-[140px]"
             >
               {visualClips.map((vc) => (
                 <option key={vc.id} value={vc.id}>
@@ -354,8 +360,8 @@ export const KeyframeGraphEditor: React.FC<KeyframeGraphEditorProps> = ({
                   }}
                   className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1.5 border transition-colors whitespace-nowrap cursor-pointer ${
                     active
-                      ? 'bg-[#1c2536] border-blue-500 text-white'
-                      : 'bg-[#0d1016] border-[#242b37] text-slate-300 hover:text-white'
+                      ? 'bg-blue-50 dark:bg-[#1c2536] border-blue-500 text-blue-800 dark:text-white'
+                      : 'bg-white dark:bg-[#0d1016] border-slate-300 dark:border-[#242b37] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
                   <span
@@ -363,12 +369,12 @@ export const KeyframeGraphEditor: React.FC<KeyframeGraphEditorProps> = ({
                     style={{ backgroundColor: pm.color }}
                   />
                   <span>{pm.shortLabel}</span>
-                  <span className="font-mono-tabular text-[10px] text-slate-400">
+                  <span className="font-mono-tabular text-[10px] text-slate-500 dark:text-slate-400">
                     {Math.round(val * pm.displayMultiplier)}
                     {pm.unit}
                   </span>
                   {count > 0 && (
-                    <span className="font-mono-tabular text-[10px] text-blue-300">
+                    <span className="font-mono-tabular text-[10px] text-blue-600 dark:text-blue-300">
                       [{count}]
                     </span>
                   )}
@@ -380,8 +386,8 @@ export const KeyframeGraphEditor: React.FC<KeyframeGraphEditorProps> = ({
 
         {/* Quick 1-click Animation Presets */}
         <div className="flex items-center gap-1">
-          <Sparkles className="w-3 h-3 text-slate-400" />
-          <span className="text-[10px] text-slate-400 mr-0.5">Presets:</span>
+          <Sparkles className="w-3 h-3 text-slate-500 dark:text-slate-400" />
+          <span className="text-[10px] text-slate-500 dark:text-slate-400 mr-0.5">Presets:</span>
           {(
             [
               ['fadeInOut', 'Fade In/Out'],
@@ -394,7 +400,7 @@ export const KeyframeGraphEditor: React.FC<KeyframeGraphEditorProps> = ({
               key={id}
               type="button"
               onClick={() => handleApplyPreset(id)}
-              className="px-2 py-0.5 rounded bg-[#161b24] hover:bg-[#1f2633] border border-[#2a3140] text-[10px] text-slate-200 cursor-pointer whitespace-nowrap"
+              className="px-2 py-0.5 rounded bg-white hover:bg-slate-100 dark:bg-[#161b24] dark:hover:bg-[#1f2633] border border-slate-300 dark:border-[#2a3140] text-[10px] text-slate-700 dark:text-slate-200 cursor-pointer whitespace-nowrap"
             >
               {label}
             </button>
@@ -556,14 +562,14 @@ export const KeyframeGraphEditor: React.FC<KeyframeGraphEditorProps> = ({
       </div>
 
       {/* Bottom Keyframe Inspector & Transport Controls */}
-      <div className="px-3 py-1.5 bg-[#12161e] border-t border-[#232832] flex flex-wrap items-center justify-between gap-2 text-[11px]">
+      <div className="px-3 py-1.5 bg-slate-50 dark:bg-[#12161e] border-t border-slate-200 dark:border-[#232832] flex flex-wrap items-center justify-between gap-2 text-[11px]">
         <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
             onClick={() => handleStepKeyframe(-1)}
             disabled={points.length === 0}
             title="Jump to previous keyframe"
-            className="p-1 rounded bg-[#0d1016] border border-[#262c38] text-slate-300 hover:text-white disabled:opacity-35 cursor-pointer"
+            className="p-1 rounded bg-white dark:bg-[#0d1016] border border-slate-300 dark:border-[#262c38] text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white disabled:opacity-35 cursor-pointer"
           >
             <ChevronLeft className="w-3.5 h-3.5" />
           </button>
@@ -580,19 +586,19 @@ export const KeyframeGraphEditor: React.FC<KeyframeGraphEditorProps> = ({
             onClick={() => handleStepKeyframe(1)}
             disabled={points.length === 0}
             title="Jump to next keyframe"
-            className="p-1 rounded bg-[#0d1016] border border-[#262c38] text-slate-300 hover:text-white disabled:opacity-35 cursor-pointer"
+            className="p-1 rounded bg-white dark:bg-[#0d1016] border border-slate-300 dark:border-[#262c38] text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white disabled:opacity-35 cursor-pointer"
           >
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
 
-          <span className="text-slate-400 font-mono-tabular ml-1">
-            {meta.label}: <strong className="text-slate-100">{displayCurrent}</strong>
+          <span className="text-slate-500 dark:text-slate-400 font-mono-tabular ml-1">
+            {meta.label}: <strong className="text-slate-900 dark:text-slate-100">{displayCurrent}</strong>
           </span>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex items-center gap-1">
-            <span className="text-[10px] text-slate-400">Curve:</span>
+            <span className="text-[10px] text-slate-500 dark:text-slate-400">Curve:</span>
             {EASING_LABELS.map((es) => {
               const curEase = selectedPoint ? selectedPoint.easing : defaultEasing;
               return (
@@ -611,8 +617,8 @@ export const KeyframeGraphEditor: React.FC<KeyframeGraphEditorProps> = ({
                   }}
                   className={`px-1.5 py-0.5 rounded text-[10px] border cursor-pointer ${
                     curEase === es.id
-                      ? 'bg-[#1c2536] border-blue-500 text-white'
-                      : 'bg-[#0d1016] border-[#252b37] text-slate-300 hover:text-white'
+                      ? 'bg-blue-50 dark:bg-[#1c2536] border-blue-500 text-blue-700 dark:text-white'
+                      : 'bg-white dark:bg-[#0d1016] border-slate-300 dark:border-[#252b37] text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
                   {es.label}
@@ -623,8 +629,8 @@ export const KeyframeGraphEditor: React.FC<KeyframeGraphEditorProps> = ({
 
           {selectedPoint ? (
             <div className="flex items-center gap-1.5 font-mono-tabular">
-              <Diamond className="w-3 h-3 text-blue-400" />
-              <label className="flex items-center gap-1 text-[10px] text-slate-400">
+              <Diamond className="w-3 h-3 text-blue-500 dark:text-blue-400" />
+              <label className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
                 <span>t</span>
                 <input
                   type="number"
@@ -634,19 +640,24 @@ export const KeyframeGraphEditor: React.FC<KeyframeGraphEditorProps> = ({
                   value={Number((selectedPoint.time * dur).toFixed(2))}
                   onChange={(e) => {
                     const sec = Math.max(0, Math.min(dur, Number(e.target.value) || 0));
+                    const record = !numCommittedRef.current;
+                    numCommittedRef.current = true;
                     commitPropPoints(
                       points.map((p) =>
                         p.id === selectedPoint.id ? { ...p, time: Number((sec / dur).toFixed(4)) } : p,
                       ),
                       activeProp,
-                      false,
+                      record,
                     );
                   }}
-                  className="w-14 h-6 px-1.5 rounded bg-[#0d1016] border border-[#2a3140] text-slate-100 text-[10px]"
+                  onBlur={() => {
+                    numCommittedRef.current = false;
+                  }}
+                  className="w-14 h-6 px-1.5 rounded bg-white dark:bg-[#0d1016] border border-slate-300 dark:border-[#2a3140] text-slate-900 dark:text-slate-100 text-[10px]"
                 />
                 <span>s</span>
               </label>
-              <label className="flex items-center gap-1 text-[10px] text-slate-400">
+              <label className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
                 <span>val</span>
                 <input
                   type="number"
@@ -661,15 +672,20 @@ export const KeyframeGraphEditor: React.FC<KeyframeGraphEditorProps> = ({
                       meta.min,
                       Math.min(meta.max, rawDisp / meta.displayMultiplier),
                     );
+                    const record = !numCommittedRef.current;
+                    numCommittedRef.current = true;
                     commitPropPoints(
                       points.map((p) =>
                         p.id === selectedPoint.id ? { ...p, value: Number(clamped.toFixed(4)) } : p,
                       ),
                       activeProp,
-                      false,
+                      record,
                     );
                   }}
-                  className="w-14 h-6 px-1.5 rounded bg-[#0d1016] border border-[#2a3140] text-slate-100 text-[10px]"
+                  onBlur={() => {
+                    numCommittedRef.current = false;
+                  }}
+                  className="w-14 h-6 px-1.5 rounded bg-white dark:bg-[#0d1016] border border-slate-300 dark:border-[#2a3140] text-slate-900 dark:text-slate-100 text-[10px]"
                 />
                 <span>{meta.unit}</span>
               </label>
@@ -677,7 +693,7 @@ export const KeyframeGraphEditor: React.FC<KeyframeGraphEditorProps> = ({
                 type="button"
                 onClick={handleDeleteSelected}
                 title="Delete selected keyframe"
-                className="p-1 rounded bg-red-950/50 hover:bg-red-900/60 border border-red-800/60 text-red-300 cursor-pointer"
+                className="p-1 rounded bg-red-50 hover:bg-red-100 dark:bg-red-950/50 dark:hover:bg-red-900/60 border border-red-300 dark:border-red-800/60 text-red-600 dark:text-red-300 cursor-pointer"
               >
                 <Trash2 className="w-3 h-3" />
               </button>
@@ -695,7 +711,7 @@ export const KeyframeGraphEditor: React.FC<KeyframeGraphEditorProps> = ({
                 commitPropPoints([], activeProp, true);
                 setSelectedKfId(null);
               }}
-              className="px-2 py-0.5 rounded bg-[#0d1016] hover:bg-[#1a1f29] border border-[#262c38] text-[10px] text-slate-300 flex items-center gap-1 cursor-pointer"
+              className="px-2 py-0.5 rounded bg-white hover:bg-slate-100 dark:bg-[#0d1016] dark:hover:bg-[#1a1f29] border border-slate-300 dark:border-[#262c38] text-[10px] text-slate-700 dark:text-slate-300 flex items-center gap-1 cursor-pointer"
             >
               <RotateCcw className="w-2.5 h-2.5" />
               <span>Clear {meta.shortLabel}</span>

@@ -1,16 +1,32 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 @layer base {
   :root {
     --font-display: 'Outfit', system-ui, sans-serif;
     --font-sans: 'Public Sans', system-ui, sans-serif;
     --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+    --studio-bg: #f1f5f9;
+    --studio-fg: #0f172a;
+    --scroll-track: #e2e8f0;
+    --scroll-thumb: #94a3b8;
+    --scroll-thumb-hover: #64748b;
+    --slider-track: #cbd5e1;
+  }
+
+  .dark {
+    --studio-bg: #0d0f12;
+    --studio-fg: #e2e8f0;
+    --scroll-track: #12151a;
+    --scroll-thumb: #2b323d;
+    --scroll-thumb-hover: #3d4756;
+    --slider-track: #262c36;
   }
 
   body {
     font-family: var(--font-sans);
-    background-color: #0d0f12;
-    color: #e2e8f0;
+    background-color: var(--studio-bg);
+    color: var(--studio-fg);
     overflow-x: hidden;
   }
 
@@ -47,16 +63,16 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: #12151a;
+  background: var(--scroll-track);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2b323d;
+  background: var(--scroll-thumb);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3d4756;
+  background: var(--scroll-thumb-hover);
 }
 
 /* Crisp compact studio range input */
@@ -64,7 +80,7 @@ input[type="range"].studio-slider {
   -webkit-appearance: none;
   appearance: none;
   height: 4px;
-  background: #262c36;
+  background: var(--slider-track);
   border-radius: 2px;
   outline: none;
 }

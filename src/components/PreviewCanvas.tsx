@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AudioLines,
   BookOpen,
   ChevronLeft,
   ChevronRight,
@@ -28,6 +29,7 @@ import {
 import {
   applyAnimatedClipState,
   computeClipRenderBox,
+  computeStereoMetersAtTime,
   computeTimelineDuration,
   DEFAULT_CLIP_CROP,
   evaluateAudioClipGain,
@@ -36,8 +38,11 @@ import {
   resolveEffectiveColorGrade,
   sanitizeClipCrop,
 } from '../utils/timelineMath';
+import { AudioMeterBar } from './AudioMeterBar';
+import { AudioSpectrumVisualizer } from './AudioSpectrumVisualizer';
 import { drawVectorTitle } from '../utils/titleRenderer';
 import { drawKrokodoveOverlay } from './FusionVfxStudio';
+import { registerAudioAnalyser, unregisterAudioAnalyser } from '../utils/liveAudioSpectrum';
 import {
   runSandboxedCanvasStage,
   sanitizeClipEffects,
@@ -57,6 +62,8 @@ interface PreviewCanvasProps {
   playhead: number;
   isPlaying: boolean;
   masterMuted: boolean;
+  normalizeAudio?: boolean;
+  normalizeTargetLufs?: number;
   loadingSample?: boolean;
   uploading?: boolean;
   onPlayheadChange: (t: number) => void;
@@ -300,6 +307,8 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   playhead,
   isPlaying,
   masterMuted,
+  normalizeAudio = false,
+  normalizeTargetLufs = -14,
   loadingSample = false,
   uploading = false,
   onPlayheadChange,
@@ -323,6 +332,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
     onCanvasToolChange?.(next);
   };
   const [emptyDropActive, setEmptyDropActive] = useState(false);
+  const [showSpectrum, setShowSpectrum] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const chromaCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const trackBufferCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -330,14 +340,29 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const videoCacheRef = useRef<Map<string, HTMLVideoElement>>(new Map());
 
-  // Audio playback pool with Web Audio StereoPannerNode for stereo panning
+  // Audio playback pool with Web Audio StereoPannerNode + shared AnalyserNode for live spectrum
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const masterGainNodeRef = useRef<GainNode | null>(null);
+  const analyserNodeRef = useRef<AnalyserNode | null>(null);
   const audioPoolRef = useRef<
-    Map<string, { el: HTMLAudioElement; gainNode?: GainNode; pannerNode?: StereoPannerNode }>
+    Map<
+      string,
+      {
+        el: HTMLAudioElement;
+        url: string;
+        sourceNode?: MediaElementAudioSourceNode;
+        gainNode?: GainNode;
+        pannerNode?: StereoPannerNode;
+      }
+    >
   >(new Map());
 
   const playheadRef = useRef(playhead);
   playheadRef.current = playhead;
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
+  const renderFrameRef = useRef<(t: number) => void>(() => {});
+  const syncAudioRef = useRef<(t: number, playing: boolean) => void>(() => {});
 
   const totalDuration = useMemo(() => computeTimelineDuration(clips), [clips]);
 
@@ -347,28 +372,36 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
     return { canvasW: 854, canvasH: 480 };
   }, [resolution]);
 
-  // Preload media elements using lightweight proxies when available, and evict deleted assets
+  // Preload media elements using lightweight proxies when available, keyed per clip for videos, and evict deleted items
   useEffect(() => {
-    const activeVisualIds = new Set<string>();
+    const activeImageIds = new Set<string>();
+    const activeVideoClipIds = new Set<string>();
+
     for (const c of clips) {
       if (!c.mediaId) continue;
       const asset = assetsMap.get(c.mediaId);
       if (!asset) continue;
       if (asset.mediaType !== 'image' && asset.mediaType !== 'video') continue;
-      activeVisualIds.add(c.mediaId);
       const targetUrl = asset.proxyUrl || asset.fileUrl;
 
       if (asset.mediaType === 'image') {
+        activeImageIds.add(c.mediaId);
         const existing = imageCacheRef.current.get(c.mediaId);
         if (!existing || existing.dataset.srcUrl !== targetUrl) {
           const img = new Image();
           img.decoding = 'async';
           img.dataset.srcUrl = targetUrl;
+          img.onload = () => {
+            if (!isPlayingRef.current) {
+              renderFrameRef.current(playheadRef.current);
+            }
+          };
           img.src = targetUrl;
           imageCacheRef.current.set(c.mediaId, img);
         }
-      } else if (asset.mediaType === 'video') {
-        const existing = videoCacheRef.current.get(c.mediaId);
+      } else if (asset.mediaType === 'video' && c.kind === 'video') {
+        activeVideoClipIds.add(c.id);
+        const existing = videoCacheRef.current.get(c.id);
         if (!existing || existing.dataset.srcUrl !== targetUrl) {
           if (existing) {
             existing.pause();
@@ -377,27 +410,34 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
           }
           const vid = document.createElement('video');
           vid.dataset.srcUrl = targetUrl;
+          vid.onloadeddata = () => {
+            if (!isPlayingRef.current) {
+              renderFrameRef.current(playheadRef.current);
+            }
+          };
           vid.src = targetUrl;
           vid.preload = 'auto';
           vid.muted = true;
           vid.playsInline = true;
-          videoCacheRef.current.set(c.mediaId, vid);
+          videoCacheRef.current.set(c.id, vid);
         }
       }
     }
 
     for (const [id, img] of imageCacheRef.current.entries()) {
-      if (!activeVisualIds.has(id)) {
+      if (!activeImageIds.has(id)) {
+        img.onload = null;
         img.src = '';
         imageCacheRef.current.delete(id);
       }
     }
-    for (const [id, vid] of videoCacheRef.current.entries()) {
-      if (!activeVisualIds.has(id)) {
+    for (const [clipId, vid] of videoCacheRef.current.entries()) {
+      if (!activeVideoClipIds.has(clipId)) {
+        vid.onloadeddata = null;
         vid.pause();
         vid.removeAttribute('src');
         vid.load();
-        videoCacheRef.current.delete(id);
+        videoCacheRef.current.delete(clipId);
       }
     }
   }, [clips, assetsMap]);
@@ -408,20 +448,49 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
     const audioClips = clips.filter((c) => c.kind === 'audio' && c.mediaId);
     const activeIds = new Set(audioClips.map((c) => c.id));
 
+    const disposeNode = (node: {
+      el: HTMLAudioElement;
+      sourceNode?: MediaElementAudioSourceNode;
+      gainNode?: GainNode;
+      pannerNode?: StereoPannerNode;
+    }) => {
+      node.el.pause();
+      node.el.removeAttribute('src');
+      node.el.load();
+      try {
+        node.sourceNode?.disconnect();
+        node.gainNode?.disconnect();
+        node.pannerNode?.disconnect();
+      } catch {
+        // ignore disconnect errors
+      }
+    };
+
     for (const [clipId, node] of pool.entries()) {
       if (!activeIds.has(clipId)) {
-        node.el.pause();
+        disposeNode(node);
         pool.delete(clipId);
       }
     }
 
     for (const clip of audioClips) {
-      if (!clip.mediaId || pool.has(clip.id)) continue;
+      if (!clip.mediaId) continue;
       const asset = assetsMap.get(clip.mediaId);
       if (!asset) continue;
-      const el = new Audio(asset.proxyUrl || asset.fileUrl);
+      const targetUrl = asset.proxyUrl || asset.fileUrl;
+      const existing = pool.get(clip.id);
+      if (existing) {
+        if (existing.url !== targetUrl) {
+          disposeNode(existing);
+          const el = new Audio(targetUrl);
+          el.preload = 'auto';
+          pool.set(clip.id, { el, url: targetUrl });
+        }
+        continue;
+      }
+      const el = new Audio(targetUrl);
       el.preload = 'auto';
-      pool.set(clip.id, { el });
+      pool.set(clip.id, { el, url: targetUrl });
     }
   }, [clips, assetsMap]);
 
@@ -450,18 +519,32 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
         continue;
       }
 
-      // Lazy-attach Web Audio panner on first play gesture
+      // Lazy-attach Web Audio panner & shared FFT AnalyserNode on first play gesture
       if (!entry.pannerNode && typeof AudioContext !== 'undefined') {
         try {
           if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
           const ctx = audioCtxRef.current;
           if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+          if (!masterGainNodeRef.current || !analyserNodeRef.current) {
+            const mGain = ctx.createGain();
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 512;
+            analyser.smoothingTimeConstant = 0.78;
+            analyser.minDecibels = -74;
+            analyser.maxDecibels = -4;
+            mGain.connect(analyser);
+            analyser.connect(ctx.destination);
+            masterGainNodeRef.current = mGain;
+            analyserNodeRef.current = analyser;
+            registerAudioAnalyser(ctx, analyser);
+          }
           const src = ctx.createMediaElementSource(entry.el);
           const gainNode = ctx.createGain();
           const pannerNode = ctx.createStereoPanner();
           src.connect(gainNode);
           gainNode.connect(pannerNode);
-          pannerNode.connect(ctx.destination);
+          pannerNode.connect(masterGainNodeRef.current);
+          entry.sourceNode = src;
           entry.gainNode = gainNode;
           entry.pannerNode = pannerNode;
         } catch {
@@ -475,7 +558,8 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
         : localT * clip.speed;
       const targetSrcT = clip.trimStart + mappedOffset;
 
-      if (Math.abs(entry.el.currentTime - targetSrcT) > 0.12) {
+      const audioDriftThresh = playing ? 0.28 : 0.08;
+      if (Math.abs(entry.el.currentTime - targetSrcT) > audioDriftThresh) {
         try {
           entry.el.currentTime = Math.max(0, targetSrcT);
         } catch {
@@ -508,14 +592,14 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
 
     // Sync active <video> elements (smooth forward decode + embedded video audio when unmuted)
     const videoTrackMap = new Map(tracks.filter((tr) => tr.kind === 'video').map((tr) => [tr.id, tr]));
-    const activeVideoMediaIds = new Set<string>();
+    const activeVideoClipIds = new Set<string>();
     for (const clip of clips) {
       if (clip.kind !== 'video' || !clip.mediaId) continue;
-      const vid = videoCacheRef.current.get(clip.mediaId);
+      const vid = videoCacheRef.current.get(clip.id);
       if (!vid) continue;
       const inWindow = t >= clip.startTime && t <= clip.startTime + clip.duration;
       if (!playing || !inWindow || clip.reverse) continue;
-      activeVideoMediaIds.add(clip.mediaId);
+      activeVideoClipIds.add(clip.id);
 
       const trk = videoTrackMap.get(clip.trackId);
       const canHear = !masterMuted && !clip.muted && clip.hasAudio && Boolean(trk) && !trk?.hidden && !trk?.muted;
@@ -537,8 +621,8 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
       }
     }
 
-    for (const [mediaId, vid] of videoCacheRef.current.entries()) {
-      if (!activeVideoMediaIds.has(mediaId)) {
+    for (const [clipId, vid] of videoCacheRef.current.entries()) {
+      if (!activeVideoClipIds.has(clipId)) {
         if (!vid.paused) vid.pause();
         vid.muted = true;
       }
@@ -553,12 +637,31 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
     return () => {
       for (const entry of audioPoolRef.current.values()) {
         entry.el.pause();
+        entry.el.removeAttribute('src');
+        entry.el.load();
+        try {
+          entry.sourceNode?.disconnect();
+          entry.gainNode?.disconnect();
+          entry.pannerNode?.disconnect();
+        } catch {
+          // ignore
+        }
       }
       for (const vid of videoCacheRef.current.values()) {
+        vid.onloadeddata = null;
         vid.pause();
         vid.removeAttribute('src');
         vid.load();
       }
+      unregisterAudioAnalyser(analyserNodeRef.current);
+      try {
+        masterGainNodeRef.current?.disconnect();
+        analyserNodeRef.current?.disconnect();
+      } catch {
+        // ignore
+      }
+      masterGainNodeRef.current = null;
+      analyserNodeRef.current = null;
       if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
         audioCtxRef.current.close().catch(() => {});
       }
@@ -614,14 +717,15 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
         return null;
       }
       if (clip.kind === 'video') {
-        const vid = videoCacheRef.current.get(clip.mediaId);
+        const vid = videoCacheRef.current.get(clip.id);
         if (vid && vid.readyState >= 2) {
           const elapsed = Math.max(0, t - clip.startTime);
           const mapped = clip.reverse
             ? Math.max(0, (clip.duration - elapsed) * clip.speed)
             : elapsed * clip.speed;
           const desiredT = clip.trimStart + mapped;
-          if (Math.abs(vid.currentTime - desiredT) > 0.12) {
+          const driftThresh = isPlayingRef.current ? 0.35 : 0.06;
+          if (Math.abs(vid.currentTime - desiredT) > driftThresh) {
             try {
               vid.currentTime = Math.min(vid.duration || desiredT, Math.max(0, desiredT));
             } catch {
@@ -639,7 +743,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
     for (const c of clips) {
       if (c.kind !== 'video' || !c.mediaId) continue;
       if (c.startTime > t && c.startTime - t <= 2.0) {
-        const vid = videoCacheRef.current.get(c.mediaId);
+        const vid = videoCacheRef.current.get(c.id);
         if (vid && vid.readyState >= 1 && vid.paused) {
           const preT = c.reverse
             ? Math.max(0, c.trimStart + c.duration * c.speed)
@@ -668,20 +772,25 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
 
       const drawStageResult = runSandboxedCanvasStage('clip-fx', ctx, () => {
         let transPair: { clipA: TimelineClip; clipB: TimelineClip; p: number } | null = null;
+        let usedOverlapPair = false;
 
         if (activeAtT.length >= 2) {
           const clipA = activeAtT[0];
           const clipB = activeAtT[1];
           const overlapStart = clipB.startTime;
           const overlapEnd = Math.min(clipA.startTime + clipA.duration, clipB.startTime + clipB.duration);
-          const transDur = Math.max(0.05, overlapEnd - overlapStart);
-          transPair = {
-            clipA,
-            clipB,
-            p: Math.max(0, Math.min(1, (t - overlapStart) / transDur)),
-          };
-        } else if (activeAtT.length === 1) {
-          const cur = activeAtT[0];
+          const overlapSec = overlapEnd - overlapStart;
+          if (overlapSec > 0.04) {
+            usedOverlapPair = true;
+            transPair = {
+              clipA,
+              clipB,
+              p: Math.max(0, Math.min(1, (t - overlapStart) / overlapSec)),
+            };
+          }
+        }
+        if (!usedOverlapPair) {
+          const cur = activeAtT[activeAtT.length - 1];
           const curIdx = trkClips.findIndex((c) => c.id === cur.id);
           const prev = curIdx > 0 ? trkClips[curIdx - 1] : null;
           const next = curIdx >= 0 && curIdx + 1 < trkClips.length ? trkClips[curIdx + 1] : null;
@@ -872,7 +981,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
             drawClip(clipB, srcB, progB, 0, 0, 1, 1, p);
           }
         } else {
-          const clip = activeAtT[0];
+          const clip = activeAtT[activeAtT.length - 1];
           const src = getVisualSource(clip);
           if (src) {
             const prog = (t - clip.startTime) / Math.max(0.1, clip.duration);
@@ -986,6 +1095,9 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
     }
   };
 
+  renderFrameRef.current = renderFrame;
+  syncAudioRef.current = syncAudioAtTime;
+
   useEffect(() => {
     if (!isPlaying) {
       renderFrame(playhead);
@@ -1008,16 +1120,16 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
         nextT = 0;
         onTogglePlay();
         onPlayheadChange(0);
-        syncAudioAtTime(0, false);
-        renderFrame(0);
+        syncAudioRef.current(0, false);
+        renderFrameRef.current(0);
         return;
       }
 
       playheadRef.current = nextT;
       if (now - lastDraw >= 32) {
         lastDraw = now;
-        renderFrame(nextT);
-        syncAudioAtTime(nextT, true);
+        renderFrameRef.current(nextT);
+        syncAudioRef.current(nextT, true);
         onPlayheadChange(nextT);
       }
       rafId = requestAnimationFrame(tick);
@@ -1025,7 +1137,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
 
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [isPlaying, totalDuration, clips, tracks, colorGrade, bypassGrade, canvasW, canvasH]);
+  }, [isPlaying, totalDuration]);
 
   // Measure preview viewport so interactive SVG handle overlay aligns 1:1 with canvas
   useEffect(() => {
@@ -1067,7 +1179,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
         if (clip.mediaId) {
           const asset = assetsMap.get(clip.mediaId);
           const img = imageCacheRef.current.get(clip.mediaId);
-          const vid = videoCacheRef.current.get(clip.mediaId);
+          const vid = videoCacheRef.current.get(clip.id);
           if (img && img.naturalWidth > 0) {
             srcW = img.naturalWidth;
             srcH = img.naturalHeight;
@@ -1241,10 +1353,10 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#101318] border border-[#232832] rounded-lg overflow-hidden">
+    <div className="flex flex-col h-full bg-white dark:bg-[#101318] border border-slate-200 dark:border-[#232832] rounded-lg overflow-hidden shadow-xs dark:shadow-none">
       {/* Layer Canvas Tool Bar (Resize / Crop direct manipulation) */}
       {clips.length > 0 && (
-        <div className="h-8 px-3 border-b border-[#232832] bg-[#14171d] flex items-center justify-between gap-2 text-[11px] shrink-0">
+        <div className="h-8 px-3 border-b border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#14171d] flex items-center justify-between gap-2 text-[11px] shrink-0">
           <div className="flex items-center gap-1">
             <button
               type="button"
@@ -1253,7 +1365,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
               className={`px-2 py-0.5 rounded flex items-center gap-1 font-medium transition-colors cursor-pointer ${
                 activeTool === 'resize'
                   ? 'bg-blue-600 text-white'
-                  : 'bg-[#1b2029] text-slate-300 hover:text-white'
+                  : 'bg-slate-200 dark:bg-[#1b2029] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               <Move className="w-3 h-3" />
@@ -1266,7 +1378,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
               className={`px-2 py-0.5 rounded flex items-center gap-1 font-medium transition-colors cursor-pointer ${
                 activeTool === 'crop'
                   ? 'bg-amber-600 text-white'
-                  : 'bg-[#1b2029] text-slate-300 hover:text-white'
+                  : 'bg-slate-200 dark:bg-[#1b2029] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               <Crop className="w-3 h-3" />
@@ -1277,10 +1389,10 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
           <div className="flex items-center gap-2 min-w-0">
             {selectedActiveEntry ? (
               <>
-                <span className="text-slate-400 truncate max-w-[140px]">
+                <span className="text-slate-600 dark:text-slate-400 truncate max-w-[140px]">
                   {selectedActiveEntry.clip.name}
                 </span>
-                <span className="text-slate-300 font-mono-tabular hidden sm:inline">
+                <span className="text-slate-800 dark:text-slate-300 font-mono-tabular hidden sm:inline">
                   {Math.round((selectedActiveEntry.clip.scale || 1) * (selectedActiveEntry.clip.scaleX ?? 1) * 100)}%×
                   {Math.round((selectedActiveEntry.clip.scale || 1) * (selectedActiveEntry.clip.scaleY ?? 1) * 100)}%
                 </span>
@@ -1291,7 +1403,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
                       onCommitHistory?.();
                       onUpdateClip(selectedActiveEntry.clip.id, { scale: 1, scaleX: 1, scaleY: 1, x: 0, y: 0 });
                     }}
-                    className="px-1.5 py-0.5 rounded bg-[#1b2029] hover:bg-[#272f3d] text-slate-300 hover:text-white flex items-center gap-1 cursor-pointer"
+                    className="px-1.5 py-0.5 rounded bg-slate-200 hover:bg-slate-300 dark:bg-[#1b2029] dark:hover:bg-[#272f3d] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 cursor-pointer"
                     title="Reset layer size & position"
                   >
                     <RotateCcw className="w-2.5 h-2.5" />
@@ -1305,7 +1417,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
                       onCommitHistory?.();
                       onUpdateClip(selectedActiveEntry.clip.id, { crop: { ...DEFAULT_CLIP_CROP } });
                     }}
-                    className="px-1.5 py-0.5 rounded bg-amber-600/20 hover:bg-amber-600/35 border border-amber-500/40 text-amber-200 flex items-center gap-1 cursor-pointer"
+                    className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-600/20 hover:bg-amber-100 dark:hover:bg-amber-600/35 border border-amber-400/60 dark:border-amber-500/40 text-amber-800 dark:text-amber-200 flex items-center gap-1 cursor-pointer"
                     title="Reset layer crop"
                   >
                     <RotateCcw className="w-2.5 h-2.5" />
@@ -1338,8 +1450,10 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
             onUploadFiles(e.dataTransfer.files);
           }
         }}
-        className={`relative flex-1 min-h-0 flex items-center justify-center bg-[#090b0e] p-2 transition-colors ${
-          emptyDropActive ? 'ring-2 ring-inset ring-blue-500 bg-blue-950/20' : ''
+        className={`relative flex-1 min-h-0 flex items-center justify-center p-2 transition-colors ${
+          clips.length === 0 ? 'bg-slate-100 dark:bg-[#090b0e]' : 'bg-[#090b0e]'
+        } ${
+          emptyDropActive ? 'ring-2 ring-inset ring-blue-500 bg-blue-50 dark:bg-blue-950/20' : ''
         }`}
       >
         {clips.length === 0 ? (
@@ -1358,8 +1472,8 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
               }}
             />
             <div>
-              <h2 className="text-base font-semibold text-slate-100">Create a Video in Minutes</h2>
-              <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">Create a Video in Minutes</h2>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1.5 leading-relaxed">
                 Drop photos, video clips, or music right here—or start immediately with our sample pack to preview beat-synced transitions and effects.
               </p>
             </div>
@@ -1385,12 +1499,12 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
                   type="button"
                   disabled={uploading}
                   onClick={() => emptyUploadRef.current?.click()}
-                  className="px-4 py-2 rounded bg-[#1b2029] hover:bg-[#252c38] border border-[#2f3746] disabled:opacity-50 text-slate-100 text-xs font-medium flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  className="px-4 py-2 rounded bg-white hover:bg-slate-50 dark:bg-[#1b2029] dark:hover:bg-[#252c38] border border-slate-300 dark:border-[#2f3746] disabled:opacity-50 text-slate-800 dark:text-slate-100 text-xs font-medium flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   {uploading ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500 dark:text-blue-400" />
                   ) : (
-                    <Upload className="w-3.5 h-3.5 text-blue-400" />
+                    <Upload className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
                   )}
                   <span>{uploading ? 'Uploading...' : 'Upload Your Media'}</span>
                 </button>
@@ -1409,7 +1523,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
                   <button
                     type="button"
                     onClick={onOpenTutorial}
-                    className="text-blue-400 hover:text-blue-300 inline-flex items-center gap-1 cursor-pointer"
+                    className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 inline-flex items-center gap-1 cursor-pointer"
                   >
                     <BookOpen className="w-3 h-3" />
                     <span>Walkthrough</span>
@@ -1431,7 +1545,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
               ref={canvasRef}
               width={canvasW}
               height={canvasH}
-              className="w-full h-full block rounded border border-[#1f242d] bg-black"
+              className="w-full h-full block rounded border border-slate-700 dark:border-[#1f242d] bg-black"
             />
             {!isPlaying && onUpdateClip && (
               <svg
@@ -1511,10 +1625,28 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
         )}
       </div>
 
+      {/* Collapsible Live Audio Spectrum Analyzer Drawer */}
+      {clips.length > 0 && showSpectrum && (
+        <div className="px-3 py-2 border-t border-slate-200 dark:border-[#232832] bg-slate-100 dark:bg-[#0c1016] shrink-0">
+          <AudioSpectrumVisualizer
+            tracks={tracks}
+            clips={clips}
+            playhead={playhead}
+            isPlaying={isPlaying}
+            masterMuted={masterMuted}
+            normalizeAudio={Boolean(normalizeAudio)}
+            normalizeTargetLufs={normalizeTargetLufs ?? -14}
+            bandCount={40}
+            heightClass="h-20"
+            title="Live Audio Frequency Spectrum (RTA · 36 Hz – 15.5 kHz)"
+          />
+        </div>
+      )}
+
       {/* Frame-Accurate Transport Bar */}
-      <div className="h-11 px-4 border-t border-[#232832] bg-[#14171d] flex items-center justify-between gap-3 shrink-0">
-        <div className="flex items-center gap-2 text-xs text-slate-400 font-mono-tabular">
-          <span className="text-slate-100 font-medium">{formatFrameTimecode(playhead, fps)}</span>
+      <div className="h-11 px-4 border-t border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#14171d] flex items-center justify-between gap-3 shrink-0">
+        <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono-tabular">
+          <span className="text-slate-900 dark:text-slate-100 font-medium">{formatFrameTimecode(playhead, fps)}</span>
           <span aria-hidden="true">/</span>
           <span className="hidden sm:inline">{formatFrameTimecode(totalDuration, fps)}</span>
         </div>
@@ -1525,7 +1657,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
             onClick={() => onPlayheadChange(0)}
             disabled={clips.length === 0}
             title="Jump to start"
-            className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-[#222731] disabled:opacity-40 transition-colors"
+            className="p-1.5 rounded text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#222731] disabled:opacity-40 transition-colors cursor-pointer"
           >
             <SkipBack className="w-3.5 h-3.5" />
           </button>
@@ -1534,7 +1666,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
             onClick={() => stepFrame(-1)}
             disabled={clips.length === 0}
             title="Step back 1 frame (,)"
-            className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-[#222731] disabled:opacity-40 transition-colors"
+            className="p-1.5 rounded text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#222731] disabled:opacity-40 transition-colors cursor-pointer"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
@@ -1542,7 +1674,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
             type="button"
             onClick={onTogglePlay}
             disabled={clips.length === 0}
-            className="px-3.5 py-1.5 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-medium flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0"
+            className="px-3.5 py-1.5 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-medium flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
             <span>{isPlaying ? 'Pause' : 'Play'}</span>
@@ -1552,7 +1684,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
             onClick={() => stepFrame(1)}
             disabled={clips.length === 0}
             title="Step forward 1 frame (.)"
-            className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-[#222731] disabled:opacity-40 transition-colors"
+            className="p-1.5 rounded text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#222731] disabled:opacity-40 transition-colors cursor-pointer"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
@@ -1561,23 +1693,69 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
             onClick={() => onPlayheadChange(totalDuration)}
             disabled={clips.length === 0}
             title="Jump to end"
-            className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-[#222731] disabled:opacity-40 transition-colors"
+            className="p-1.5 rounded text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#222731] disabled:opacity-40 transition-colors cursor-pointer"
           >
             <SkipForward className="w-3.5 h-3.5" />
           </button>
         </div>
 
         <div className="flex items-center gap-3">
-          <span className="hidden md:inline text-[11px] text-slate-500 font-mono-tabular">
+          {clips.length > 0 && (() => {
+            const meter = computeStereoMetersAtTime(
+              tracks,
+              clips,
+              playhead,
+              masterMuted,
+              isPlaying,
+              Boolean(normalizeAudio),
+              normalizeTargetLufs ?? -14,
+            );
+            return (
+              <div
+                className="hidden sm:flex items-center px-2 py-1 rounded bg-white dark:bg-[#0e1116] border border-slate-200 dark:border-[#232935]"
+                title={
+                  normalizeAudio
+                    ? `Master Output L/R · Normalized (${normalizeTargetLufs ?? -14} LUFS)`
+                    : 'Master Output L/R Peak/RMS Meter'
+                }
+              >
+                <AudioMeterBar
+                  leftDb={meter.leftDb}
+                  rightDb={meter.rightDb}
+                  orientation="horizontal"
+                  compact
+                  muted={masterMuted}
+                  clipping={meter.clipping}
+                />
+              </div>
+            );
+          })()}
+          {clips.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowSpectrum((s) => !s)}
+              aria-pressed={showSpectrum}
+              title={showSpectrum ? 'Hide Audio Spectrum Visualizer' : 'Show Audio Spectrum Visualizer'}
+              className={`px-2 py-1 rounded border text-[11px] font-medium flex items-center gap-1 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                showSpectrum
+                  ? 'bg-cyan-600/15 dark:bg-cyan-600/25 border-cyan-500 dark:border-cyan-400 text-cyan-800 dark:text-cyan-200'
+                  : 'bg-white dark:bg-[#0e1116] border-slate-300 dark:border-[#262c38] text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <AudioLines className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Spectrum</span>
+            </button>
+          )}
+          <span className="hidden lg:inline text-[11px] text-slate-500 font-mono-tabular">
             {fps} fps · {resolution.replace('x', '×')}
           </span>
           <button
             type="button"
             onClick={onToggleMute}
             title={masterMuted ? 'Unmute audio preview' : 'Mute audio preview'}
-            className="p-1.5 rounded text-slate-300 hover:text-white hover:bg-[#222731] transition-colors"
+            className="p-1.5 rounded text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#222731] transition-colors cursor-pointer"
           >
-            {masterMuted ? <VolumeX className="w-4 h-4 text-amber-400" /> : <Volume2 className="w-4 h-4" />}
+            {masterMuted ? <VolumeX className="w-4 h-4 text-amber-500 dark:text-amber-400" /> : <Volume2 className="w-4 h-4" />}
           </button>
         </div>
       </div>

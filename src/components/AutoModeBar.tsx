@@ -35,14 +35,14 @@ export const AutoModeBar: React.FC<AutoModeBarProps> = ({
   const activeSong = audioAssets.find((a) => a.id === selectedAudioId) || null;
 
   return (
-    <div className="bg-[#14171d] border border-[#232832] rounded-lg px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+    <div className="bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-xs dark:shadow-none">
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-slate-400">Background Song</label>
+          <label className="text-[11px] text-slate-600 dark:text-slate-400">Background Song</label>
           <select
             value={selectedAudioId}
             onChange={(e) => setSelectedAudioId(e.target.value)}
-            className="h-8 px-2.5 rounded bg-[#0e1116] border border-[#2a303d] text-xs text-slate-100 focus:outline-none focus:border-blue-500 min-w-[175px]"
+            className="h-8 px-2.5 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500 min-w-[175px]"
           >
             {audioAssets.length === 0 ? (
               <option value="">No music (use timed cuts)</option>
@@ -60,14 +60,14 @@ export const AutoModeBar: React.FC<AutoModeBarProps> = ({
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-slate-400">Beat Sync Pace</label>
+          <label className="text-[11px] text-slate-600 dark:text-slate-400">Beat Sync Pace</label>
           <select
             value={String(beatStride)}
             onChange={(e) => {
               const v = e.target.value;
               setBeatStride(v === 'fit' ? 'fit' : (Number(v) as 1 | 2 | 4));
             }}
-            className="h-8 px-2.5 rounded bg-[#0e1116] border border-[#2a303d] text-xs text-slate-100 focus:outline-none focus:border-blue-500"
+            className="h-8 px-2.5 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500"
           >
             <option value="1">Fast · Every Beat</option>
             <option value="2">Balanced · Every 2 Beats</option>
@@ -77,13 +77,13 @@ export const AutoModeBar: React.FC<AutoModeBarProps> = ({
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-slate-400">Transition Mix</label>
+          <label className="text-[11px] text-slate-600 dark:text-slate-400">Transition Mix</label>
           <select
             value={transitionStyle}
             onChange={(e) =>
               setTransitionStyle(e.target.value as AutoAssembleOptions['transitionStyle'])
             }
-            className="h-8 px-2.5 rounded bg-[#0e1116] border border-[#2a303d] text-xs text-slate-100 focus:outline-none focus:border-blue-500"
+            className="h-8 px-2.5 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500"
           >
             <option value="dynamic">Dynamic Variety</option>
             <option value="crossfade">Smooth Crossfades</option>
@@ -94,11 +94,11 @@ export const AutoModeBar: React.FC<AutoModeBarProps> = ({
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-slate-400">Length Limit</label>
+          <label className="text-[11px] text-slate-600 dark:text-slate-400">Length Limit</label>
           <select
             value={String(maxSongDuration)}
             onChange={(e) => setMaxSongDuration(Number(e.target.value))}
-            className="h-8 px-2 rounded bg-[#0e1116] border border-[#2a303d] text-xs text-slate-100 focus:outline-none focus:border-blue-500"
+            className="h-8 px-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500"
           >
             <option value="15">15s Short / Reel</option>
             <option value="32">32s Highlight</option>
@@ -108,7 +108,7 @@ export const AutoModeBar: React.FC<AutoModeBarProps> = ({
         </div>
 
         <div className="flex flex-col gap-1">
-          <label className="text-[11px] text-slate-400">
+          <label className="text-[11px] text-slate-600 dark:text-slate-400">
             Transition ({transitionStyle === 'cut' ? '0.00s' : `${transitionDuration.toFixed(2)}s`})
           </label>
           <input
@@ -123,12 +123,12 @@ export const AutoModeBar: React.FC<AutoModeBarProps> = ({
           />
         </div>
 
-        <label className="flex items-center gap-2 text-xs text-slate-300 mt-4 cursor-pointer select-none whitespace-nowrap">
+        <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 mt-4 cursor-pointer select-none whitespace-nowrap">
           <input
             type="checkbox"
             checked={enableMotion}
             onChange={(e) => setEnableMotion(e.target.checked)}
-            className="rounded border-[#2a303d] bg-[#0e1116] text-blue-600"
+            className="rounded border-slate-300 dark:border-[#2a303d] bg-white dark:bg-[#0e1116] text-blue-600"
           />
           <span>Ken Burns Motion</span>
         </label>
@@ -136,17 +136,17 @@ export const AutoModeBar: React.FC<AutoModeBarProps> = ({
 
       <div className="flex items-center gap-3">
         {activeSong ? (
-          <span className="text-xs text-slate-400 font-mono-tabular hidden xl:inline">
-            <Music className="w-3 h-3 inline mr-1 text-blue-400" />
+          <span className="text-xs text-slate-600 dark:text-slate-400 font-mono-tabular hidden xl:inline">
+            <Music className="w-3 h-3 inline mr-1 text-blue-500 dark:text-blue-400" />
             {activeSong.bpm || 120} BPM · {activeSong.beats?.length || 0} beats
           </span>
         ) : visualAssets.length === 0 && onLoadSamplePack ? (
           <button
             type="button"
             onClick={onLoadSamplePack}
-            className="h-9 px-3 rounded bg-[#1d222b] hover:bg-[#262d39] border border-[#2c3340] text-slate-200 text-xs font-medium flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            className="h-9 px-3 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#1d222b] dark:hover:bg-[#262d39] border border-slate-300 dark:border-[#2c3340] text-slate-800 dark:text-slate-200 text-xs font-medium flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
-            <FolderPlus className="w-3.5 h-3.5 text-blue-400" />
+            <FolderPlus className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
             <span>Load Sample Pack</span>
           </button>
         ) : null}

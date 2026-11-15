@@ -144,12 +144,25 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
   const bgImgRef = useRef<HTMLImageElement | null>(null);
   const particlesRef = useRef<Particle3D[]>([]);
   const timeRef = useRef<number>(0);
+  const specCommittedRef = useRef<boolean>(false);
 
   // Sync inspector with newly selected clip's Fusion settings
   useEffect(() => {
     if (targetClip?.fusion) {
-      setLocalSpec({ ...targetClip.fusion });
+      setLocalSpec({
+        ...targetClip.fusion,
+        rotoscopePoints: targetClip.fusion.rotoscopePoints.map((p) => ({ ...p })),
+      });
+    } else {
+      setLocalSpec({
+        ...DEFAULT_FUSION_VFX,
+        enabled: true,
+        particlePreset: 'embers',
+        krokodoveEffect: 'hud_rings',
+        rotoscopePoints: [],
+      });
     }
+    setTrackResults([]);
   }, [targetClip?.id]);
 
   // Load clip image plate for interactive rotoscope & tracker preview
@@ -158,13 +171,20 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
       bgImgRef.current = null;
       return;
     }
+    let cancelled = false;
     const url = targetClipAsset.thumbUrl || targetClipAsset.fileUrl;
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
-      bgImgRef.current = img;
+      if (!cancelled) {
+        bgImgRef.current = img;
+      }
     };
     img.src = url;
+    return () => {
+      cancelled = true;
+      img.onload = null;
+    };
   }, [targetClipAsset?.id, targetClipAsset?.thumbUrl, targetClipAsset?.fileUrl]);
 
   const effectiveSpec = useMemo(() => {
@@ -179,12 +199,27 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
     };
   }, [localSpec, nodes]);
 
-  const patchSpec = (patch: Partial<FusionVfxSpec>) => {
+  const patchSpec = (patch: Partial<FusionVfxSpec>, commitDiscrete = false) => {
+    if (commitDiscrete && targetClip) {
+      onCommitHistory();
+    }
     const next = { ...localSpec, ...patch, enabled: true };
     setLocalSpec(next);
     if (targetClip) {
       onUpdateClip(targetClip.id, { fusion: next });
     }
+  };
+
+  const patchSpecSlider = (patch: Partial<FusionVfxSpec>) => {
+    if (!specCommittedRef.current && targetClip) {
+      onCommitHistory();
+      specCommittedRef.current = true;
+    }
+    patchSpec(patch, false);
+  };
+
+  const resetSpecGesture = () => {
+    specCommittedRef.current = false;
   };
 
   // Seed / resize 3D particle pool
@@ -421,7 +456,7 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
 
     if (viewportMode === 'roto') {
       const nextPts: RotoscopePoint[] = [...localSpec.rotoscopePoints, { x: nx, y: ny }];
-      patchSpec({ rotoscopeEnabled: true, rotoscopePoints: nextPts });
+      patchSpec({ rotoscopeEnabled: true, rotoscopePoints: nextPts }, true);
     } else if (viewportMode === 'tracker') {
       setTrackAnchor({ x: nx, y: ny });
     }
@@ -435,24 +470,28 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
     if (cvs) {
       const ctx = cvs.getContext('2d');
       if (ctx) {
-        const ax = Math.max(16, Math.min(cvs.width - 17, Math.round(trackAnchor.x * cvs.width)));
-        const ay = Math.max(16, Math.min(cvs.height - 17, Math.round(trackAnchor.y * cvs.height)));
-        const data = ctx.getImageData(ax - 16, ay - 16, 32, 32).data;
-        let wx = 0;
-        let wy = 0;
-        let sumW = 0;
-        for (let y = 0; y < 32; y++) {
-          for (let x = 0; x < 32; x++) {
-            const idx = (y * 32 + x) * 4;
-            const lum = data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
-            wx += (x - 15.5) * lum;
-            wy += (y - 15.5) * lum;
-            sumW += lum;
+        try {
+          const ax = Math.max(16, Math.min(cvs.width - 17, Math.round(trackAnchor.x * cvs.width)));
+          const ay = Math.max(16, Math.min(cvs.height - 17, Math.round(trackAnchor.y * cvs.height)));
+          const data = ctx.getImageData(ax - 16, ay - 16, 32, 32).data;
+          let wx = 0;
+          let wy = 0;
+          let sumW = 0;
+          for (let y = 0; y < 32; y++) {
+            for (let x = 0; x < 32; x++) {
+              const idx = (y * 32 + x) * 4;
+              const lum = data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
+              wx += (x - 15.5) * lum;
+              wy += (y - 15.5) * lum;
+              sumW += lum;
+            }
           }
-        }
-        if (sumW > 1) {
-          baseShiftX = (wx / sumW) * 0.35;
-          baseShiftY = (wy / sumW) * 0.35;
+          if (sumW > 1) {
+            baseShiftX = (wx / sumW) * 0.35;
+            baseShiftY = (wy / sumW) * 0.35;
+          }
+        } catch {
+          // Canvas may be tainted if a cross-origin plate lacks CORS headers; fall back to solve curve
         }
       }
     }
@@ -465,7 +504,7 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
     setTrackResults(frames);
     const avgDx = Number((frames.reduce((s, f) => s + f.dx, 0) / frames.length).toFixed(2));
     const avgDy = Number((frames.reduce((s, f) => s + f.dy, 0) / frames.length).toFixed(2));
-    patchSpec({ trackOffsetX: avgDx, trackOffsetY: avgDy });
+    patchSpec({ trackOffsetX: avgDx, trackOffsetY: avgDy }, true);
   };
 
   const handleBakeOverlay = () => {
@@ -514,14 +553,14 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
       {/* Left + Center: Live Fusion Viewport + Keyframe Graph / Node Flow Dock */}
       <div className="flex-1 min-w-0 flex flex-col gap-3">
         {/* Top Interactive Canvas Viewport */}
-        <div className="flex-1 min-h-[210px] bg-[#14171d] border border-[#232832] rounded-lg overflow-hidden flex flex-col">
-          <div className="px-3.5 py-2 border-b border-[#232832] bg-[#171b22] flex flex-wrap items-center justify-between gap-2">
+        <div className="flex-1 min-h-[210px] bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg overflow-hidden flex flex-col shadow-xs dark:shadow-none">
+          <div className="px-3.5 py-2 border-b border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#171b22] flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-              <span className="text-xs font-semibold text-slate-100">
+              <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span className="text-xs font-semibold text-slate-900 dark:text-slate-100">
                 Fusion VFX & Keyframe Animation
               </span>
-              <span className="text-[11px] text-slate-400 truncate max-w-[200px]">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[200px]">
                 {targetClip ? `· ${targetClip.name}` : '· Procedural Composition'}
               </span>
             </div>
@@ -543,7 +582,7 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
                     className={`px-2.5 py-1 rounded text-[11px] font-medium flex items-center gap-1 transition-colors whitespace-nowrap cursor-pointer ${
                       viewportMode === m.id
                         ? 'bg-blue-600 text-white'
-                        : 'bg-[#101318] border border-[#262c38] text-slate-300 hover:text-white'
+                        : 'bg-white dark:bg-[#101318] border border-slate-300 dark:border-[#262c38] text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
                     }`}
                   >
                     <Icon className="w-3 h-3" />
@@ -554,7 +593,7 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
               <button
                 type="button"
                 onClick={() => setSimPlaying((p) => !p)}
-                className="ml-1 px-2.5 py-1 rounded bg-[#1d222b] hover:bg-[#272e3b] border border-[#2c3442] text-[11px] text-slate-200 flex items-center gap-1 cursor-pointer"
+                className="ml-1 px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#1d222b] dark:hover:bg-[#272e3b] border border-slate-300 dark:border-[#2c3442] text-[11px] text-slate-800 dark:text-slate-200 flex items-center gap-1 cursor-pointer"
               >
                 {simPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
                 <span>{simPlaying ? 'Pause' : 'Play'}</span>
@@ -568,7 +607,7 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
               width={640}
               height={360}
               onClick={handleViewportClick}
-              className="max-w-full max-h-[250px] aspect-video rounded border border-[#232832] cursor-crosshair"
+              className="max-w-full max-h-[250px] aspect-video rounded border border-slate-700 dark:border-[#232832] cursor-crosshair"
             />
             {viewportMode === 'roto' && (
               <span className="absolute bottom-3 left-1/2 -translate-x-1/2 px-2.5 py-1 rounded bg-black/75 border border-amber-500/40 text-[10px] text-amber-200 pointer-events-none">
@@ -584,8 +623,8 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
         </div>
 
         {/* Bottom Dock: Keyframe Graph Editor | Node Flow Graph */}
-        <div className="h-[268px] bg-[#14171d] border border-[#232832] rounded-lg overflow-hidden flex flex-col">
-          <div className="px-3 py-1.5 border-b border-[#232832] bg-[#171b22] flex flex-wrap items-center justify-between gap-2">
+        <div className="h-[268px] bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg overflow-hidden flex flex-col shadow-xs dark:shadow-none">
+          <div className="px-3 py-1.5 border-b border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#171b22] flex flex-wrap items-center justify-between gap-2">
             <div className="inline-flex items-center gap-1">
               <button
                 type="button"
@@ -593,7 +632,7 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
                 className={`px-2.5 py-1 rounded text-[11px] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
                   lowerDockTab === 'keyframes'
                     ? 'bg-blue-600 text-white'
-                    : 'bg-[#101318] border border-[#262c38] text-slate-300 hover:text-white'
+                    : 'bg-white dark:bg-[#101318] border border-slate-300 dark:border-[#262c38] text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
                 }`}
               >
                 <Activity className="w-3 h-3" />
@@ -608,7 +647,7 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
                 className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors cursor-pointer ${
                   lowerDockTab === 'nodes'
                     ? 'bg-blue-600 text-white'
-                    : 'bg-[#101318] border border-[#262c38] text-slate-300 hover:text-white'
+                    : 'bg-white dark:bg-[#101318] border border-slate-300 dark:border-[#262c38] text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
                 }`}
               >
                 Node Flow Graph ({nodes.filter((n) => !n.bypassed).length}/{nodes.length})
@@ -616,19 +655,19 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
             </div>
 
             {lowerDockTab === 'nodes' ? (
-              <div className="flex items-center gap-2 text-[10px] text-slate-400">
+              <div className="flex items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400">
                 <span>Click node to inspect · Toggle ON/OFF to bypass</span>
                 <button
                   type="button"
                   onClick={() => setNodes(INITIAL_NODES)}
-                  className="px-2 py-0.5 rounded bg-[#101318] border border-[#262c38] text-slate-300 hover:text-white flex items-center gap-1 cursor-pointer"
+                  className="px-2 py-0.5 rounded bg-white dark:bg-[#101318] border border-slate-300 dark:border-[#262c38] text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white flex items-center gap-1 cursor-pointer"
                 >
                   <RotateCcw className="w-2.5 h-2.5" />
                   <span>Reset Graph</span>
                 </button>
               </div>
             ) : (
-              <span className="text-[10px] text-slate-400 font-mono-tabular">
+              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono-tabular">
                 Animate Opacity · Scale · Position · Rotation over time
               </span>
             )}
@@ -646,7 +685,7 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
               onCommitHistory={onCommitHistory}
             />
           ) : (
-            <div className="flex-1 overflow-auto bg-[#0b0d12] relative p-2">
+            <div className="flex-1 overflow-auto bg-slate-100 dark:bg-[#0b0d12] relative p-2">
               <div className="relative min-w-[810px] h-[180px]">
                 <svg className="absolute inset-0 w-full h-full pointer-events-none">
                   {GRAPH_EDGES.map(([fromId, toId]) => {
@@ -664,7 +703,7 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
                         key={`${fromId}-${toId}`}
                         d={`M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`}
                         fill="none"
-                        stroke={active ? '#3b82f6' : '#334155'}
+                        stroke={active ? '#3b82f6' : '#64748b'}
                         strokeWidth={active ? 2 : 1.5}
                         strokeDasharray={active ? undefined : '4 4'}
                       />
@@ -683,14 +722,14 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
                       style={{ left: `${node.x}px`, top: `${node.y}px`, width: '110px' }}
                       className={`absolute rounded border px-2 py-1.5 cursor-pointer transition-colors ${
                         node.bypassed
-                          ? 'bg-[#12151c] border-[#262b36] opacity-55'
+                          ? 'bg-slate-200 dark:bg-[#12151c] border-slate-300 dark:border-[#262b36] opacity-55'
                           : isSel
-                            ? 'bg-[#1b273c] border-blue-400'
-                            : 'bg-[#161b24] border-[#2c3444] hover:border-slate-500'
+                            ? 'bg-blue-50 dark:bg-[#1b273c] border-blue-500 dark:border-blue-400 shadow-xs dark:shadow-none'
+                            : 'bg-white dark:bg-[#161b24] border-slate-300 dark:border-[#2c3444] hover:border-slate-400 dark:hover:border-slate-500 shadow-xs dark:shadow-none'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-1">
-                        <span className="text-[10px] font-semibold text-slate-100 truncate">
+                        <span className="text-[10px] font-semibold text-slate-900 dark:text-slate-100 truncate">
                           {node.label}
                         </span>
                         <button
@@ -702,14 +741,14 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
                           title={node.bypassed ? 'Enable node' : 'Bypass node'}
                           className={`px-1 rounded text-[8px] font-mono-tabular border cursor-pointer ${
                             node.bypassed
-                              ? 'border-slate-600 text-slate-400'
-                              : 'border-emerald-500/60 text-emerald-300 bg-emerald-500/10'
+                              ? 'border-slate-400 dark:border-slate-600 text-slate-500 dark:text-slate-400'
+                              : 'border-emerald-500/60 text-emerald-700 dark:text-emerald-300 bg-emerald-500/10'
                           }`}
                         >
                           {node.bypassed ? 'OFF' : 'ON'}
                         </button>
                       </div>
-                      <p className="text-[9px] text-slate-400 truncate mt-0.5">{node.subtitle}</p>
+                      <p className="text-[9px] text-slate-500 dark:text-slate-400 truncate mt-0.5">{node.subtitle}</p>
                     </div>
                   );
                 })}
@@ -720,19 +759,19 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
       </div>
 
       {/* Right Column: Selected Node Parameter Inspector */}
-      <aside className="w-full lg:w-[300px] shrink-0 bg-[#14171d] border border-[#232832] rounded-lg flex flex-col overflow-hidden text-xs">
-        <div className="px-3.5 py-2 border-b border-[#232832] bg-[#171b22] flex items-center justify-between">
+      <aside className="w-full lg:w-[300px] shrink-0 bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg flex flex-col overflow-hidden text-xs shadow-xs dark:shadow-none">
+        <div className="px-3.5 py-2 border-b border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#171b22] flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            <Sliders className="w-3.5 h-3.5 text-blue-400" />
-            <span className="font-semibold text-slate-100">{selectedNode.label}</span>
+            <Sliders className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+            <span className="font-semibold text-slate-900 dark:text-slate-100">{selectedNode.label}</span>
           </div>
-          <span className="text-[10px] text-slate-400">{selectedNode.subtitle}</span>
+          <span className="text-[10px] text-slate-500 dark:text-slate-400">{selectedNode.subtitle}</span>
         </div>
 
         <div className="flex-1 overflow-y-auto p-3.5 space-y-4">
           {/* 3D Particle System Controls */}
-          <section className="space-y-2 pb-3 border-b border-[#232832]">
-            <p className="text-[11px] font-semibold text-slate-200">3D Particle System (pEmitter3D)</p>
+          <section className="space-y-2 pb-3 border-b border-slate-200 dark:border-[#232832]">
+            <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">3D Particle System (pEmitter3D)</p>
             <div className="grid grid-cols-5 gap-1">
               {(
                 [
@@ -746,18 +785,18 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
                 <button
                   key={id}
                   type="button"
-                  onClick={() => patchSpec({ particlePreset: id })}
+                  onClick={() => patchSpec({ particlePreset: id }, true)}
                   className={`py-1 rounded text-[10px] font-medium border cursor-pointer ${
                     localSpec.particlePreset === id
                       ? 'bg-blue-600 border-blue-500 text-white'
-                      : 'bg-[#0e1116] border-[#252b37] text-slate-300 hover:text-white'
+                      : 'bg-slate-50 dark:bg-[#0e1116] border-slate-300 dark:border-[#252b37] text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
                   }`}
                 >
                   {label}
                 </button>
               ))}
             </div>
-            <label className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
+            <label className="flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-400">
               <span>Particle Density ({localSpec.particleDensity})</span>
               <input
                 type="range"
@@ -765,12 +804,15 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
                 max={120}
                 step={5}
                 value={localSpec.particleDensity}
-                onChange={(e) => patchSpec({ particleDensity: Number(e.target.value) })}
+                onChange={(e) => patchSpecSlider({ particleDensity: Number(e.target.value) })}
+                onPointerUp={resetSpecGesture}
+                onPointerCancel={resetSpecGesture}
+                onBlur={resetSpecGesture}
                 className="studio-slider w-28"
               />
             </label>
             <div className="grid grid-cols-2 gap-2">
-              <label className="space-y-1 text-[10px] text-slate-400">
+              <label className="space-y-1 text-[10px] text-slate-600 dark:text-slate-400">
                 <span>Camera Yaw ({cameraYaw}°)</span>
                 <input
                   type="range"
@@ -781,7 +823,7 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
                   className="studio-slider w-full"
                 />
               </label>
-              <label className="space-y-1 text-[10px] text-slate-400">
+              <label className="space-y-1 text-[10px] text-slate-600 dark:text-slate-400">
                 <span>Camera Pitch ({cameraPitch}°)</span>
                 <input
                   type="range"
@@ -793,24 +835,25 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
                 />
               </label>
             </div>
-            <label className="flex items-center justify-between text-[11px] text-slate-400">
+            <label className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400">
               <span>Emitter Tint</span>
               <input
                 type="color"
                 value={localSpec.particleColor}
-                onChange={(e) => patchSpec({ particleColor: e.target.value })}
-                className="w-8 h-6 rounded bg-transparent border border-[#2d3544] cursor-pointer"
+                onChange={(e) => patchSpecSlider({ particleColor: e.target.value })}
+                onBlur={resetSpecGesture}
+                className="w-8 h-6 rounded bg-transparent border border-slate-300 dark:border-[#2d3544] cursor-pointer"
               />
             </label>
           </section>
 
           {/* Krokodove Motion Graphic Toolset */}
-          <section className="space-y-2 pb-3 border-b border-[#232832]">
-            <p className="text-[11px] font-semibold text-slate-200">Krokodove Motion Graphic Toolset</p>
+          <section className="space-y-2 pb-3 border-b border-slate-200 dark:border-[#232832]">
+            <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">Krokodove Motion Graphic Toolset</p>
             <select
               value={localSpec.krokodoveEffect}
-              onChange={(e) => patchSpec({ krokodoveEffect: e.target.value as KrokodoveEffectId })}
-              className="w-full h-8 px-2 rounded bg-[#0e1116] border border-[#2a303d] text-slate-100 text-[11px]"
+              onChange={(e) => patchSpec({ krokodoveEffect: e.target.value as KrokodoveEffectId }, true)}
+              className="w-full h-8 px-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 text-[11px]"
             >
               <option value="none">None (Bypass Krokodove)</option>
               <option value="hud_rings">Krokodove · Telemetry HUD Rings</option>
@@ -818,7 +861,7 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
               <option value="glitch_slice">Krokodove · Vector Glitch Slice</option>
               <option value="extrude_grid">Krokodove · 3D Extruded Perspective Grid</option>
             </select>
-            <label className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
+            <label className="flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-400">
               <span>Intensity ({Math.round(localSpec.krokodoveIntensity * 100)}%)</span>
               <input
                 type="range"
@@ -826,11 +869,14 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
                 max={1}
                 step={0.05}
                 value={localSpec.krokodoveIntensity}
-                onChange={(e) => patchSpec({ krokodoveIntensity: Number(e.target.value) })}
+                onChange={(e) => patchSpecSlider({ krokodoveIntensity: Number(e.target.value) })}
+                onPointerUp={resetSpecGesture}
+                onPointerCancel={resetSpecGesture}
+                onBlur={resetSpecGesture}
                 className="studio-slider w-28"
               />
             </label>
-            <label className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
+            <label className="flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-400">
               <span>Optical Glow ({Math.round(localSpec.glowAmount * 100)}%)</span>
               <input
                 type="range"
@@ -838,46 +884,49 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
                 max={1}
                 step={0.05}
                 value={localSpec.glowAmount}
-                onChange={(e) => patchSpec({ glowAmount: Number(e.target.value) })}
+                onChange={(e) => patchSpecSlider({ glowAmount: Number(e.target.value) })}
+                onPointerUp={resetSpecGesture}
+                onPointerCancel={resetSpecGesture}
+                onBlur={resetSpecGesture}
                 className="studio-slider w-28"
               />
             </label>
           </section>
 
           {/* Rotoscoping Spline Matte */}
-          <section className="space-y-2 pb-3 border-b border-[#232832]">
+          <section className="space-y-2 pb-3 border-b border-slate-200 dark:border-[#232832]">
             <div className="flex items-center justify-between">
-              <p className="text-[11px] font-semibold text-slate-200">Rotoscoping Matte</p>
+              <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">Rotoscoping Matte</p>
               <button
                 type="button"
                 onClick={() => setViewportMode('roto')}
-                className="text-[10px] text-amber-300 hover:text-amber-200 cursor-pointer"
+                className="text-[10px] text-amber-600 hover:text-amber-700 dark:text-amber-300 dark:hover:text-amber-200 cursor-pointer"
               >
                 Edit Points on View
               </button>
             </div>
             <div className="flex items-center gap-2">
-              <label className="flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
+              <label className="flex items-center gap-1.5 text-[11px] text-slate-700 dark:text-slate-300 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={localSpec.rotoscopeEnabled}
-                  onChange={(e) => patchSpec({ rotoscopeEnabled: e.target.checked })}
+                  onChange={(e) => patchSpec({ rotoscopeEnabled: e.target.checked }, true)}
                 />
                 <span>Enable Matte</span>
               </label>
-              <label className="flex items-center gap-1.5 text-[11px] text-slate-300 cursor-pointer">
+              <label className="flex items-center gap-1.5 text-[11px] text-slate-700 dark:text-slate-300 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={localSpec.rotoscopeInvert}
-                  onChange={(e) => patchSpec({ rotoscopeInvert: e.target.checked })}
+                  onChange={(e) => patchSpec({ rotoscopeInvert: e.target.checked }, true)}
                 />
                 <span>Invert</span>
               </label>
               {localSpec.rotoscopePoints.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => patchSpec({ rotoscopePoints: [], rotoscopeEnabled: false })}
-                  className="ml-auto text-[10px] text-red-400 hover:text-red-300 flex items-center gap-0.5 cursor-pointer"
+                  onClick={() => patchSpec({ rotoscopePoints: [], rotoscopeEnabled: false }, true)}
+                  className="ml-auto text-[10px] text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 flex items-center gap-0.5 cursor-pointer"
                 >
                   <Trash2 className="w-3 h-3" />
                   <span>Clear</span>
@@ -889,24 +938,24 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
           {/* Camera & Point Tracker */}
           <section className="space-y-2">
             <div className="flex items-center justify-between">
-              <p className="text-[11px] font-semibold text-slate-200">Planar / Point Tracker</p>
+              <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">Planar / Point Tracker</p>
               <button
                 type="button"
                 onClick={() => {
                   setViewportMode('tracker');
                   handleRunCameraTrack();
                 }}
-                className="px-2 py-1 rounded bg-sky-600/20 border border-sky-500/60 text-[10px] font-medium text-sky-200 hover:bg-sky-600/35 flex items-center gap-1 cursor-pointer"
+                className="px-2 py-1 rounded bg-sky-50 dark:bg-sky-600/20 border border-sky-400/70 dark:border-sky-500/60 text-[10px] font-medium text-sky-700 dark:text-sky-200 hover:bg-sky-100 dark:hover:bg-sky-600/35 flex items-center gap-1 cursor-pointer"
               >
                 <Target className="w-3 h-3" />
                 <span>Track Forward</span>
               </button>
             </div>
             {trackResults.length > 0 && (
-              <div className="bg-[#0d1016] border border-[#232832] rounded p-2 space-y-1 font-mono-tabular text-[10px]">
-                <div className="flex justify-between text-slate-400">
+              <div className="bg-slate-50 dark:bg-[#0d1016] border border-slate-200 dark:border-[#232832] rounded p-2 space-y-1 font-mono-tabular text-[10px]">
+                <div className="flex justify-between text-slate-600 dark:text-slate-400">
                   <span>Solve Offset</span>
-                  <span className="text-sky-300">
+                  <span className="text-sky-600 dark:text-sky-300">
                     dx {localSpec.trackOffsetX}% · dy {localSpec.trackOffsetY}%
                   </span>
                 </div>
@@ -923,7 +972,7 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
         </div>
 
         {/* Apply / Bake Actions */}
-        <div className="p-3 border-t border-[#232832] bg-[#11141a] space-y-1.5 shrink-0">
+        <div className="p-3 border-t border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#11141a] space-y-1.5 shrink-0">
           {targetClip && (
             <button
               type="button"
@@ -931,7 +980,7 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
                 onCommitHistory();
                 onUpdateClip(targetClip.id, { fusion: { ...localSpec, enabled: true } });
               }}
-              className="w-full py-1.5 px-3 rounded bg-[#1d222b] hover:bg-[#262d39] border border-[#2c3442] text-slate-100 text-[11px] font-medium cursor-pointer truncate"
+              className="w-full py-1.5 px-3 rounded bg-white hover:bg-slate-100 dark:bg-[#1d222b] dark:hover:bg-[#262d39] border border-slate-300 dark:border-[#2c3442] text-slate-800 dark:text-slate-100 text-[11px] font-medium cursor-pointer truncate"
             >
               Lock VFX to “{targetClip.name}”
             </button>

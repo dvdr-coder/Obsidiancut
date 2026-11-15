@@ -64,12 +64,12 @@ const STEPS = [
     ],
   },
   {
-    title: '07. Background HD/4K Export & HJSON Batch CLI',
-    goal: 'Render final video in the background with locked 48kHz AV sync, auto-download locally, or automate batches from CLI.',
+    title: '07. Quick Render Auto-Build, Background HD/4K Export & Dark/Light Modes',
+    goal: 'Auto-select transitions, opacity fades, and music playback in Quick Render, export in HD/4K, or switch themes anytime.',
     actions: [
-      'Click Export HD in the top right to pick 720p, 1080p, 4K UHD, Vertical Reels, or Square Social at 23.976–60 fps in MP4, MOV, or WebM.',
-      'Start HD Render runs in Python + FFmpeg in the background—preserving every Fusion keyframe, volume envelope, auto-duck curve, and crossfade—and auto-downloads when finished.',
-      'Need to batch-render multiple videos automatically? Check autoengine/ in the project root to run declarative .hjson manifests via Python CLI.',
+      'Open Quick Render for a 1-click workflow: click Auto-Select & Play Music (or Auto-Build & Render) to automatically assemble visuals, pick transitions, set opacity/fades, loop background music with crossfades, auto-duck under video audio, and start live playback right in the page.',
+      'Click Export HD in the top right (or Render inside Quick Render) to export 720p, 1080p, 4K UHD, Vertical Reels, or Square Social at 23.976–60 fps in MP4, MOV, or WebM with EBU R128 loudness normalization.',
+      'Toggle between Dark Studio and Light Studio anytime using the Sun/Moon button in the top header—your choice saves automatically. Batch CLI automation is also available via autoengine/.',
     ],
   },
 ];
@@ -98,25 +98,25 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({
   const step = STEPS[stepIdx];
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl bg-[#14171d] border border-[#282e3b] rounded-lg overflow-hidden flex flex-col max-h-[90vh]">
-        <div className="px-5 py-3.5 border-b border-[#232832] flex items-center justify-between">
+    <div className="fixed inset-0 z-50 bg-black/65 dark:bg-black/75 flex items-center justify-center p-4">
+      <div className="w-full max-w-2xl bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#282e3b] rounded-lg overflow-hidden flex flex-col max-h-[90vh] shadow-xl">
+        <div className="px-5 py-3.5 border-b border-slate-200 dark:border-[#232832] flex items-center justify-between">
           <div>
-            <h3 className="text-base font-semibold text-slate-100">Obsidian Cut — Quick-Start Walkthrough</h3>
-            <p className="text-xs text-slate-400">Step {stepIdx + 1} of {STEPS.length}</p>
+            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Obsidian Cut — Quick-Start Walkthrough</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Step {stepIdx + 1} of {STEPS.length}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close tutorial"
-            className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-[#232832] cursor-pointer"
+            className="p-1.5 rounded text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#232832] cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Step Navigation Strip */}
-        <div className="px-5 py-2.5 bg-[#101318] border-b border-[#232832] flex items-center gap-1.5 overflow-x-auto">
+        <div className="px-5 py-2.5 bg-slate-50 dark:bg-[#101318] border-b border-slate-200 dark:border-[#232832] flex items-center gap-1.5 overflow-x-auto">
           {STEPS.map((s, i) => (
             <button
               key={s.title}
@@ -125,7 +125,7 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({
               className={`px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
                 i === stepIdx
                   ? 'bg-blue-600 text-white'
-                  : 'bg-[#171b22] text-slate-400 hover:text-slate-100'
+                  : 'bg-white dark:bg-[#171b22] border border-slate-200 dark:border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
               }`}
             >
               Step {i + 1}
@@ -135,14 +135,14 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({
 
         <div className="p-5 overflow-y-auto space-y-5 text-sm">
           <div>
-            <h4 className="text-base font-semibold text-white">{step.title}</h4>
-            <p className="text-xs text-blue-300 mt-1">{step.goal}</p>
+            <h4 className="text-base font-semibold text-slate-900 dark:text-white">{step.title}</h4>
+            <p className="text-xs text-blue-600 dark:text-blue-300 mt-1">{step.goal}</p>
           </div>
 
-          <ul className="space-y-2.5 text-xs text-slate-300 leading-relaxed">
+          <ul className="space-y-2.5 text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
             {step.actions.map((act) => (
               <li key={act} className="flex items-start gap-2">
-                <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                <CheckCircle2 className="w-4 h-4 text-blue-500 dark:text-blue-400 shrink-0 mt-0.5" />
                 <span>{act}</span>
               </li>
             ))}
@@ -171,7 +171,7 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({
                   onSwitchMode('auto');
                   onClose();
                 }}
-                className="px-3 py-1.5 rounded bg-[#1d222b] hover:bg-[#262d39] border border-[#2c3340] text-xs text-slate-200 cursor-pointer"
+                className="px-3 py-1.5 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#1d222b] dark:hover:bg-[#262d39] border border-slate-300 dark:border-[#2c3340] text-xs text-slate-800 dark:text-slate-200 cursor-pointer"
               >
                 Switch to Auto Sync
               </button>
@@ -181,7 +181,7 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({
                   onSwitchMode('manual');
                   onClose();
                 }}
-                className="px-3 py-1.5 rounded bg-[#1d222b] hover:bg-[#262d39] border border-[#2c3340] text-xs text-slate-200 cursor-pointer"
+                className="px-3 py-1.5 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#1d222b] dark:hover:bg-[#262d39] border border-slate-300 dark:border-[#2c3340] text-xs text-slate-800 dark:text-slate-200 cursor-pointer"
               >
                 Open Endless Workspace
               </button>
@@ -189,16 +189,16 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({
           )}
 
           {/* Keyboard Shortcuts Cheat Sheet */}
-          <div className="pt-4 border-t border-[#232832]">
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-200 mb-2.5">
-              <Keyboard className="w-3.5 h-3.5 text-blue-400" />
+          <div className="pt-4 border-t border-slate-200 dark:border-[#232832]">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200 mb-2.5">
+              <Keyboard className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
               <span>Keyboard & Mouse Shortcuts</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
               {SHORTCUTS.map((sc) => (
-                <div key={sc.key} className="flex items-center justify-between gap-2 py-1 border-b border-[#1d222b]">
-                  <span className="text-slate-400">{sc.desc}</span>
-                  <kbd className="px-1.5 py-0.5 rounded bg-[#0d0f12] border border-[#2a303d] text-[10px] text-slate-200 font-mono-tabular whitespace-nowrap shrink-0">
+                <div key={sc.key} className="flex items-center justify-between gap-2 py-1 border-b border-slate-100 dark:border-[#1d222b]">
+                  <span className="text-slate-600 dark:text-slate-400">{sc.desc}</span>
+                  <kbd className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-[#0d0f12] border border-slate-300 dark:border-[#2a303d] text-[10px] text-slate-800 dark:text-slate-200 font-mono-tabular whitespace-nowrap shrink-0">
                     {sc.key}
                   </kbd>
                 </div>
@@ -207,12 +207,12 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({
           </div>
         </div>
 
-        <div className="px-5 py-3 border-t border-[#232832] bg-[#111419] flex items-center justify-between">
+        <div className="px-5 py-3 border-t border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#111419] flex items-center justify-between">
           <button
             type="button"
             disabled={stepIdx === 0}
             onClick={() => setStepIdx((s) => Math.max(0, s - 1))}
-            className="px-3 py-1.5 rounded border border-[#2a303d] text-xs text-slate-300 hover:text-white disabled:opacity-40 flex items-center gap-1 cursor-pointer disabled:cursor-default"
+            className="px-3 py-1.5 rounded border border-slate-300 dark:border-[#2a303d] text-xs text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white disabled:opacity-40 flex items-center gap-1 cursor-pointer disabled:cursor-default"
           >
             <ChevronLeft className="w-3.5 h-3.5" />
             <span>Previous</span>

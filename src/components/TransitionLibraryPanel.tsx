@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Search, Sparkles, Wand2 } from 'lucide-react';
 import {
   TRANSITION_GROUPS,
@@ -12,7 +12,7 @@ interface TransitionLibraryPanelProps {
   selectedDuration: number;
   hasTargetClip: boolean;
   visualClipCount: number;
-  onApplyTransition: (type: TransitionType, duration: number) => void;
+  onApplyTransition: (type: TransitionType, duration: number, shouldCommit?: boolean) => void;
   onApplyTransitionToAll: (type: TransitionType, duration: number) => void;
 }
 
@@ -124,6 +124,14 @@ export const TransitionLibraryPanel: React.FC<TransitionLibraryPanelProps> = ({
   const [query, setQuery] = useState<string>('');
   const [duration, setDuration] = useState<number>(selectedDuration || 0.45);
   const [pickedType, setPickedType] = useState<TransitionType>(selectedTransition || 'dissolve');
+  const sliderCommittedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    setDuration(selectedDuration > 0 ? selectedDuration : 0.45);
+    if (selectedTransition) {
+      setPickedType(selectedTransition);
+    }
+  }, [selectedClipName, selectedDuration, selectedTransition]);
 
   const activeType = selectedTransition || pickedType;
 
@@ -148,38 +156,38 @@ export const TransitionLibraryPanel: React.FC<TransitionLibraryPanelProps> = ({
   return (
     <div className="flex-1 flex flex-col min-h-0 text-xs">
       {/* Header & Target Readout */}
-      <div className="p-3 border-b border-[#232832] space-y-2.5 shrink-0 bg-[#11141a]">
+      <div className="p-3 border-b border-slate-200 dark:border-[#232832] space-y-2.5 shrink-0 bg-slate-50 dark:bg-[#11141a]">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold text-slate-200 truncate">
+            <p className="text-[11px] font-semibold text-slate-900 dark:text-slate-200 truncate">
               Transition Library ({TRANSITION_OPTIONS.length})
             </p>
-            <p className="text-[10px] text-slate-400 truncate">
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
               {hasTargetClip
                 ? `Target: ${selectedClipName || 'Selected Clip'}`
                 : 'Click a visual clip on timeline, or apply to all clips'}
             </p>
           </div>
-          <span className="text-[10px] font-mono-tabular text-blue-300 shrink-0">
+          <span className="text-[10px] font-mono-tabular text-blue-600 dark:text-blue-300 shrink-0">
             {duration.toFixed(2)}s
           </span>
         </div>
 
         {/* Search Input */}
         <div className="relative">
-          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <Search className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search transitions (iris, wipe, blur...)"
-            className="w-full h-7 pl-8 pr-2 rounded bg-[#0e1116] border border-[#242a36] text-[11px] text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+            className="w-full h-7 pl-8 pr-2 rounded bg-white dark:bg-[#0e1116] border border-slate-300 dark:border-[#242a36] text-[11px] text-slate-900 dark:text-slate-200 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
           />
         </div>
 
         {/* Duration Quick Selector */}
         <div className="space-y-1">
-          <div className="flex items-center justify-between text-[10px] text-slate-400">
+          <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
             <span>Transition Duration</span>
             <div className="flex items-center gap-1">
               {DURATION_PRESETS.map((preset) => (
@@ -194,8 +202,8 @@ export const TransitionLibraryPanel: React.FC<TransitionLibraryPanelProps> = ({
                   }}
                   className={`px-1.5 py-0.5 rounded font-mono-tabular text-[10px] border transition-colors cursor-pointer ${
                     Math.abs(duration - preset) < 0.02
-                      ? 'bg-blue-600/25 border-blue-500 text-blue-200'
-                      : 'bg-[#0e1116] border-[#252b37] text-slate-400 hover:text-white'
+                      ? 'bg-blue-50 dark:bg-blue-600/25 border-blue-500 text-blue-700 dark:text-blue-200'
+                      : 'bg-white dark:bg-[#0e1116] border-slate-300 dark:border-[#252b37] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
                   {preset}s
@@ -213,8 +221,19 @@ export const TransitionLibraryPanel: React.FC<TransitionLibraryPanelProps> = ({
               const val = Number(e.target.value);
               setDuration(val);
               if (hasTargetClip && activeType !== 'cut') {
-                onApplyTransition(activeType, val);
+                const shouldCommit = !sliderCommittedRef.current;
+                sliderCommittedRef.current = true;
+                onApplyTransition(activeType, val, shouldCommit);
               }
+            }}
+            onPointerUp={() => {
+              sliderCommittedRef.current = false;
+            }}
+            onPointerCancel={() => {
+              sliderCommittedRef.current = false;
+            }}
+            onBlur={() => {
+              sliderCommittedRef.current = false;
             }}
             className="studio-slider w-full"
           />
@@ -230,7 +249,7 @@ export const TransitionLibraryPanel: React.FC<TransitionLibraryPanelProps> = ({
               className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors whitespace-nowrap cursor-pointer ${
                 groupFilter === grp
                   ? 'bg-blue-600 border-blue-500 text-white'
-                  : 'bg-[#0e1116] border-[#242a36] text-slate-400 hover:text-slate-200'
+                  : 'bg-white dark:bg-[#0e1116] border-slate-300 dark:border-[#242a36] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
             >
               {grp}
@@ -256,16 +275,16 @@ export const TransitionLibraryPanel: React.FC<TransitionLibraryPanelProps> = ({
                 title={opt.description}
                 className={`p-2 rounded border text-left transition-colors flex flex-col gap-1.5 cursor-pointer ${
                   isSelected
-                    ? 'bg-blue-600/15 border-blue-500 text-white'
-                    : 'bg-[#101318] border-[#222732] hover:border-slate-500 text-slate-200'
+                    ? 'bg-blue-50 dark:bg-blue-600/15 border-blue-500 text-blue-900 dark:text-white'
+                    : 'bg-slate-50 dark:bg-[#101318] border-slate-200 dark:border-[#222732] hover:border-slate-400 dark:hover:border-slate-500 text-slate-800 dark:text-slate-200'
                 }`}
               >
                 <TransitionPreviewThumbnail type={opt.value} active={isSelected} />
                 <div className="flex items-center justify-between gap-1">
                   <span className="text-[11px] font-medium truncate">{opt.label}</span>
-                  {isSelected && <Check className="w-3 h-3 text-blue-400 shrink-0" />}
+                  {isSelected && <Check className="w-3 h-3 text-blue-500 dark:text-blue-400 shrink-0" />}
                 </div>
-                <p className="text-[9px] text-slate-400 truncate">{opt.description}</p>
+                <p className="text-[9px] text-slate-500 dark:text-slate-400 truncate">{opt.description}</p>
               </button>
             );
           })
@@ -273,7 +292,7 @@ export const TransitionLibraryPanel: React.FC<TransitionLibraryPanelProps> = ({
       </div>
 
       {/* Batch Apply Footer */}
-      <div className="p-2.5 border-t border-[#232832] bg-[#11141a] flex items-center gap-1.5 shrink-0">
+      <div className="p-2.5 border-t border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#11141a] flex items-center gap-1.5 shrink-0">
         <button
           type="button"
           disabled={!hasTargetClip}
@@ -288,9 +307,9 @@ export const TransitionLibraryPanel: React.FC<TransitionLibraryPanelProps> = ({
           disabled={visualClipCount < 2}
           onClick={() => onApplyTransitionToAll(activeType, activeType === 'cut' ? 0 : duration)}
           title="Apply selected transition between all touching visual clips"
-          className="py-1.5 px-2.5 rounded bg-[#1d222b] hover:bg-[#272f3d] border border-[#2c3442] disabled:opacity-40 text-slate-200 text-[11px] font-medium flex items-center gap-1 transition-colors whitespace-nowrap cursor-pointer"
+          className="py-1.5 px-2.5 rounded bg-white hover:bg-slate-100 dark:bg-[#1d222b] dark:hover:bg-[#272f3d] border border-slate-300 dark:border-[#2c3442] disabled:opacity-40 text-slate-700 dark:text-slate-200 text-[11px] font-medium flex items-center gap-1 transition-colors whitespace-nowrap cursor-pointer"
         >
-          <Sparkles className="w-3 h-3 text-amber-400" />
+          <Sparkles className="w-3 h-3 text-amber-500 dark:text-amber-400" />
           <span>Apply All</span>
         </button>
       </div>

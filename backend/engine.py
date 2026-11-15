@@ -80,6 +80,11 @@ def build_track_dsp_filters(dsp: dict | None) -> list[str]:
     if reverb_mix > 0.02:
         wet = round(min(0.65, reverb_mix * 0.6), 2)
         filters.append(f"aecho=0.8:0.85:45|90:{wet}|{round(wet * 0.7, 2)}")
+    if dsp.get("normalizeEnabled"):
+        target_lufs = safe_float(dsp.get("normalizeTargetLufs", -16.0), -16.0, -30.0, -5.0)
+        filters.append(f"loudnorm=I={target_lufs:.1f}:TP=-1.5:LRA=11")
+        filters.append("aresample=48000")
+        filters.append("aformat=sample_rates=48000:channel_layouts=stereo")
     if dsp.get("limiterEnabled"):
         filters.append("alimiter=limit=0.95:attack=5:release=50")
     return filters
@@ -674,7 +679,19 @@ def map_afade_curve(curve_name: str | None) -> str:
         return "exp"
     if c == "log":
         return "log"
-    return "qsin"
+    return "hsin"
+
+
+def resolve_xfade_afade_curve(aclip: dict) -> str:
+    explicit = aclip.get("audioCrossfadeCurve")
+    if explicit in {"linear", "exp", "scurve", "log"}:
+        return map_afade_curve(explicit)
+    tr_type = str(aclip.get("audioTransitionOut", "cut"))
+    if tr_type == "crossfade_lin":
+        return "tri"
+    if tr_type == "crossfade_exp":
+        return "exp"
+    return "hsin"
 
 
 def build_audio_gain_filters(
@@ -732,7 +749,8 @@ def build_audio_gain_filters(
             if other.get("id") == aclip.get("id") or other.get("muted"):
                 continue
             otrk = audio_track_map.get(other.get("trackId", ""), {})
-            if otrk.get("muted"):
+            oparent = audio_track_map.get(otrk.get("parentFolderId", ""), {}) if otrk.get("parentFolderId") else {}
+            if otrk.get("muted") or oparent.get("muted"):
                 continue
             is_fg = (
                 (other.get("kind") == "video" and other.get("hasAudio"))
@@ -762,10 +780,21 @@ def build_audio_gain_filters(
     return filters
 
 
+SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def validate_safe_id(val: object, label: str = "assetId") -> str:
+    s = str(val or "").strip()
+    if not SAFE_ID_RE.fullmatch(s):
+        raise ValueError(f"Invalid {label}")
+    return s
+
+
 def resolve_media_path(media_id: str) -> Path:
-    matches = list(UPLOAD_DIR.glob(f"{media_id}.*"))
+    safe_id = validate_safe_id(media_id, "mediaId")
+    matches = list(UPLOAD_DIR.glob(f"{safe_id}.*"))
     if not matches:
-        raise FileNotFoundError(f"Media file not found: {media_id}")
+        raise FileNotFoundError(f"Media file not found: {safe_id}")
     return matches[0]
 
 
@@ -1084,7 +1113,7 @@ def render_job_worker(job_id: str, payload: dict) -> None:
                 work_h = make_even(int(box_h * 1.15))
                 chain.append(f"scale={work_w}:{work_h}:force_original_aspect_ratio=increase,crop={work_w}:{work_h}")
                 chain.append(f"zoompan=z='{z_expr}':x='{x_expr}':y='{y_expr}':d={total_frames}:s={box_w}x{box_h}:fps={fps_expr}")
-                chain.append(f"settb={tb_expr}")
+                chain.append(f"setpts=PTS-STARTPTS,settb={tb_expr}")
             elif fit == "contain" or not force_exact_box:
                 if force_exact_box:
                     chain.append(f"scale={box_w}:{box_h}:force_original_aspect_ratio=decrease,pad={box_w}:{box_h}:(ow-iw)/2:(oh-ih)/2:color=black")
@@ -1114,6 +1143,8 @@ def render_job_worker(job_id: str, payload: dict) -> None:
 
             if force_exact_box:
                 chain.append("format=yuv420p,setsar=1")
+                if not op_is_anim and opacity < 0.99:
+                    chain.append(f"colorchannelmixer=rr={opacity:.3f}:gg={opacity:.3f}:bb={opacity:.3f}")
             else:
                 chain.append("format=yuva420p,setsar=1")
                 if not rot_is_anim and abs(rot_deg) > 0.2:
@@ -1127,7 +1158,13 @@ def render_job_worker(job_id: str, payload: dict) -> None:
                 chain.append(f"loop=loop={max(0, total_frames - 1)}:size=1:start=0")
                 chain.append(f"setpts=N/(({fps_expr})*TB),fps={fps_expr},settb={tb_expr}")
 
-            if not force_exact_box:
+            if force_exact_box:
+                if fade_in > 0.03:
+                    chain.append(f"fade=t=in:st=0:d={fade_in:.3f}")
+                if fade_out > 0.03:
+                    fo_st = max(0.0, dur - fade_out)
+                    chain.append(f"fade=t=out:st={fo_st:.3f}:d={fade_out:.3f}")
+            else:
                 if scale_is_anim:
                     chain.append(
                         f"scale=w='max(2\\,trunc((iw*({scale_expr}))/2)*2)':h='max(2\\,trunc((ih*({scale_expr}))/2)*2)':eval=frame"
@@ -1135,7 +1172,7 @@ def render_job_worker(job_id: str, payload: dict) -> None:
                 if rot_is_anim:
                     chain.append(f"rotate=a='{rot_expr}':ow='hypot(iw\\,ih)':oh='hypot(iw\\,ih)':c=none")
                 if op_is_anim:
-                    chain.append(f"geq=r='r(X\\,Y)':g='g(X\\,Y)':b='b(X\\,Y)':a='alpha(X\\,Y)*({op_expr})'")
+                    chain.append(f"geq=r='r(X\\,Y)':g='g(X\\,Y)':b='b(X\\,Y)':a='alpha(X\\,Y)*({op_expr})',format=yuva420p")
                 if fade_in > 0.03:
                     chain.append(f"fade=t=in:st=0:d={fade_in:.3f}:alpha=1")
                 if fade_out > 0.03:
@@ -1150,6 +1187,7 @@ def render_job_worker(job_id: str, payload: dict) -> None:
 
         # Composite each visible video track bottom-to-top
         for trk in video_tracks_bottom_up:
+            is_bottom_video_track = trk is video_tracks_bottom_up[0]
             trk_clips = sorted(
                 [c for c in clips if c.get("trackId") == trk["id"] and c.get("kind") in {"image", "video", "title"}],
                 key=lambda c: float(c.get("startTime", 0.0)),
@@ -1167,9 +1205,20 @@ def render_job_worker(job_id: str, payload: dict) -> None:
                     prev_end = float(prev_c.get("startTime", 0)) + float(prev_c.get("duration", 0))
                     next_start = float(next_c.get("startTime", 0))
                     t_type, t_dur = extract_clip_transition(prev_c)
+                    prev_transparent = (
+                        float(prev_c.get("opacity", 1.0)) < 0.99
+                        or float(prev_c.get("fadeIn", 0.0)) > 0.03
+                        or float(prev_c.get("fadeOut", 0.0)) > 0.03
+                    )
+                    next_transparent = (
+                        float(next_c.get("opacity", 1.0)) < 0.99
+                        or float(next_c.get("fadeIn", 0.0)) > 0.03
+                        or float(next_c.get("fadeOut", 0.0)) > 0.03
+                    )
                     can_xfade = (
                         t_type != "cut"
                         and t_dur >= 0.05
+                        and (is_bottom_video_track or (not prev_transparent and not next_transparent))
                         and prev_c.get("kind") != "title"
                         and next_c.get("kind") != "title"
                         and abs(float(prev_c.get("scale", 1.0)) - 1.0) < 0.02
@@ -1378,24 +1427,24 @@ def render_job_worker(job_id: str, payload: dict) -> None:
             same_trk_clips = audio_by_track.get(aclip.get("trackId", ""), [])
             pos_in_trk = next((i for i, item in enumerate(same_trk_clips) if item.get("id") == aclip.get("id")), -1)
             in_tr_dur = 0.0
-            in_tr_curve = "qsin"
+            in_tr_curve = "hsin"
             if pos_in_trk > 0:
                 prev_a = same_trk_clips[pos_in_trk - 1]
                 prev_end = float(prev_a.get("startTime", 0.0)) + float(prev_a.get("duration", 0.0))
                 if (start_time - prev_end) <= 0.25 and prev_a.get("audioTransitionOut", "cut") != "cut":
-                    raw_td = safe_float(prev_a.get("audioTransitionDuration", 1.2), 1.2, 0.1, 4.0)
-                    in_tr_dur = min(clip_dur * 0.48, raw_td)
-                    in_tr_curve = "tri" if prev_a.get("audioTransitionOut") == "crossfade_lin" else "qsin"
+                    raw_td = safe_float(prev_a.get("audioTransitionDuration", 1.2), 1.2, 0.1, 5.0)
+                    in_tr_dur = min(clip_dur * 0.85, raw_td)
+                    in_tr_curve = resolve_xfade_afade_curve(prev_a)
 
             out_tr_dur = 0.0
-            out_tr_curve = "qsin"
+            out_tr_curve = "hsin"
             if pos_in_trk >= 0 and pos_in_trk + 1 < len(same_trk_clips):
                 next_a = same_trk_clips[pos_in_trk + 1]
                 next_start = float(next_a.get("startTime", 0.0))
                 if (next_start - (start_time + clip_dur)) <= 0.25 and aclip.get("audioTransitionOut", "cut") != "cut":
-                    raw_td = safe_float(aclip.get("audioTransitionDuration", 1.2), 1.2, 0.1, 4.0)
-                    out_tr_dur = min(clip_dur * 0.48, raw_td)
-                    out_tr_curve = "tri" if aclip.get("audioTransitionOut") == "crossfade_lin" else "qsin"
+                    raw_td = safe_float(aclip.get("audioTransitionDuration", 1.2), 1.2, 0.1, 5.0)
+                    out_tr_dur = min(clip_dur * 0.85, raw_td)
+                    out_tr_curve = resolve_xfade_afade_curve(aclip)
 
             cmd.extend(["-i", str(a_path)])
             a_lbl = f"am{a_idx}"
@@ -1434,13 +1483,22 @@ def render_job_worker(job_id: str, payload: dict) -> None:
 
         has_final_audio = len(audio_mix_labels) > 0
         if has_final_audio:
+            master_norm = bool(export_cfg.get("normalizeAudio"))
+            master_lufs = safe_float(export_cfg.get("normalizeTargetLufs", -14.0), -14.0, -30.0, -5.0)
+            norm_tail = (
+                f",loudnorm=I={master_lufs:.1f}:TP=-1.5:LRA=11,aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo"
+                if master_norm
+                else ""
+            )
             if len(audio_mix_labels) == 1:
                 single = audio_mix_labels[0].strip("[]")
-                filter_parts.append(f"[{single}]atrim=0:{total_duration:.3f},asetpts=PTS-STARTPTS[aout]")
+                filter_parts.append(
+                    f"[{single}]atrim=0:{total_duration:.3f},asetpts=PTS-STARTPTS{norm_tail}[aout]"
+                )
             else:
                 filter_parts.append(
                     f"{''.join(audio_mix_labels)}amix=inputs={len(audio_mix_labels)}:duration=longest:dropout_transition=0:normalize=0,"
-                    f"atrim=0:{total_duration:.3f},asetpts=PTS-STARTPTS[aout]"
+                    f"atrim=0:{total_duration:.3f},asetpts=PTS-STARTPTS{norm_tail}[aout]"
                 )
 
         cmd.extend(["-filter_complex", ";".join(filter_parts)])
@@ -1597,6 +1655,12 @@ class EngineHandler(BaseHTTPRequestHandler):
                         start = int(m.group(1))
                         end = int(m.group(2)) if m.group(2) else file_size - 1
                         end = min(end, file_size - 1)
+                        if start >= file_size or start > end:
+                            self.send_response(416)
+                            self.send_header("Content-Range", f"bytes */{file_size}")
+                            self.send_header("Content-Length", "0")
+                            self.end_headers()
+                            return
                         length = end - start + 1
                         self.send_response(206)
                         self.send_header("Content-Type", mime)
@@ -1647,30 +1711,40 @@ class EngineHandler(BaseHTTPRequestHandler):
 
         if path == "/probe":
             try:
-                file_path = body["filePath"]
-                asset_id = body["assetId"]
+                file_path = body.get("filePath")
+                asset_id = validate_safe_id(body.get("assetId"), "assetId")
+                if not isinstance(file_path, str) or not file_path.strip() or not Path(file_path).is_file():
+                    self._send_json(400, {"error": "Invalid or missing filePath"})
+                    return
                 meta = probe_media(file_path, asset_id)
                 if meta["mediaType"] == "audio":
                     audio_info = analyze_audio_beats(file_path)
                     meta.update(audio_info)
                 self._send_json(200, meta)
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
             except Exception as exc:
                 self._send_json(500, {"error": str(exc)})
             return
 
         if path == "/analyze-audio":
             try:
-                asset_id = body["assetId"]
+                asset_id = validate_safe_id(body.get("assetId"), "assetId")
                 m_path = resolve_media_path(asset_id)
                 info = analyze_audio_beats(str(m_path))
                 self._send_json(200, info)
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
+            except FileNotFoundError as exc:
+                self._send_json(404, {"error": str(exc)})
             except Exception as exc:
                 self._send_json(500, {"error": str(exc)})
             return
 
         if path == "/generate-sample-audio":
             try:
-                asset_id = body.get("assetId") or uuid.uuid4().hex[:12]
+                raw_id = body.get("assetId")
+                asset_id = validate_safe_id(raw_id, "assetId") if raw_id is not None else uuid.uuid4().hex[:12]
                 out_wav = UPLOAD_DIR / f"{asset_id}.wav"
                 generate_sample_audio(out_wav, duration=16.0, bpm=120)
                 meta = probe_media(str(out_wav), asset_id)
@@ -1679,11 +1753,19 @@ class EngineHandler(BaseHTTPRequestHandler):
                 meta["assetId"] = asset_id
                 meta["filePath"] = str(out_wav)
                 self._send_json(200, meta)
+            except ValueError as exc:
+                self._send_json(400, {"error": str(exc)})
             except Exception as exc:
                 self._send_json(500, {"error": str(exc)})
             return
 
         if path == "/render":
+            if not isinstance(body, dict) or (
+                not (isinstance(body.get("clips"), list) and len(body["clips"]) > 0)
+                and not (isinstance(body.get("slides"), list) and len(body["slides"]) > 0)
+            ):
+                self._send_json(400, {"error": "Render payload requires a non-empty clips array"})
+                return
             job_id = uuid.uuid4().hex[:12]
             with JOBS_LOCK:
                 JOBS[job_id] = {

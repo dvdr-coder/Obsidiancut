@@ -147,6 +147,8 @@ export interface TrackAudioDsp {
   compressorEnabled: boolean;
   limiterEnabled: boolean;
   reverbMix: number;        // 0..0.8
+  normalizeEnabled?: boolean;
+  normalizeTargetLufs?: number; // -23 | -16 | -14
   vstSlots: VstPluginSlot[];
 }
 
@@ -176,7 +178,7 @@ export interface ClipCrop {
 }
 
 export type AudioFadeCurve = 'linear' | 'scurve' | 'exp' | 'log';
-export type AudioTransitionType = 'cut' | 'crossfade_eq' | 'crossfade_lin' | 'dip_swell';
+export type AudioTransitionType = 'cut' | 'crossfade_eq' | 'crossfade_lin' | 'crossfade_exp' | 'dip_swell';
 
 export interface AudioVolumePoint {
   id: string;
@@ -239,6 +241,7 @@ export interface TimelineClip {
   audioFadeCurve?: AudioFadeCurve;
   audioTransitionOut?: AudioTransitionType;
   audioTransitionDuration?: number;
+  audioCrossfadeCurve?: AudioFadeCurve;
   volumeEnvelope?: AudioVolumePoint[];
   backgroundDucking?: boolean;
   duckLevel?: number; // 0.1..0.8 (default 0.28)
@@ -337,6 +340,8 @@ export interface ExportConfig {
   format: 'mp4' | 'webm' | 'mov';
   speedProfile: 'ultrafast' | 'veryfast' | 'medium';
   autoDownload: boolean;
+  normalizeAudio?: boolean;
+  normalizeTargetLufs?: number;
 }
 
 export interface RenderJobStatus {
@@ -411,6 +416,8 @@ export const DEFAULT_TRACK_AUDIO_DSP: TrackAudioDsp = {
   compressorEnabled: false,
   limiterEnabled: true,
   reverbMix: 0,
+  normalizeEnabled: false,
+  normalizeTargetLufs: -16,
   vstSlots: [],
 };
 

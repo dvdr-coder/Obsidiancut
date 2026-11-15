@@ -284,22 +284,27 @@ export function evaluateAudioClipGain(
     gain *= applyAudioFadeCurve(rem / clip.fadeOut, curve);
   }
 
-  // Audio transition dip/swell at boundary with touching/overlapping next audio clip on same track
+  // Audio transition crossfade/dip at boundary with overlapping or touching next audio clip on same track
   if (allClips && clip.audioTransitionOut && clip.audioTransitionOut !== 'cut') {
-    const tDur = Math.max(0.15, Math.min(dur * 0.45, clip.audioTransitionDuration || 0.8));
+    const tDur = Math.max(0.1, Math.min(dur * 0.85, clip.audioTransitionDuration || 0.8));
+    const xfadeCurve: AudioFadeCurve =
+      clip.audioCrossfadeCurve ??
+      (clip.audioTransitionOut === 'crossfade_lin'
+        ? 'linear'
+        : clip.audioTransitionOut === 'crossfade_exp'
+          ? 'exp'
+          : 'scurve');
     if (rem <= tDur) {
-      const p = Math.max(0, Math.min(1, (tDur - rem) / tDur));
+      const remFrac = Math.max(0, Math.min(1, rem / tDur));
       if (clip.audioTransitionOut === 'dip_swell') {
-        gain *= 1 - 0.85 * p;
-      } else if (clip.audioTransitionOut === 'crossfade_eq') {
-        gain *= Math.cos(p * Math.PI * 0.5);
+        gain *= 1 - 0.85 * (1 - applyAudioFadeCurve(remFrac, xfadeCurve));
       } else {
-        gain *= 1 - p;
+        gain *= applyAudioFadeCurve(remFrac, xfadeCurve);
       }
     }
   }
 
-  // Incoming audio transition from previous clip on same track
+  // Incoming audio crossfade transition from previous overlapping or touching clip on same track
   if (allClips) {
     const sameTrackClips = allClips
       .filter((c) => c.trackId === clip.trackId && c.kind === 'audio')
@@ -310,16 +315,19 @@ export function evaluateAudioClipGain(
       prev &&
       prev.audioTransitionOut &&
       prev.audioTransitionOut !== 'cut' &&
-      prev.startTime + prev.duration - clip.startTime >= -0.15
+      prev.startTime + prev.duration - clip.startTime >= -0.25
     ) {
-      const tDur = Math.max(0.15, Math.min(dur * 0.45, prev.audioTransitionDuration || 0.8));
+      const tDur = Math.max(0.1, Math.min(dur * 0.85, prev.audioTransitionDuration || 0.8));
+      const xfadeCurve: AudioFadeCurve =
+        prev.audioCrossfadeCurve ??
+        (prev.audioTransitionOut === 'crossfade_lin'
+          ? 'linear'
+          : prev.audioTransitionOut === 'crossfade_exp'
+            ? 'exp'
+            : 'scurve');
       if (localTime <= tDur) {
-        const p = Math.max(0, Math.min(1, localTime / tDur));
-        if (prev.audioTransitionOut === 'crossfade_eq') {
-          gain *= Math.sin(p * Math.PI * 0.5);
-        } else {
-          gain *= p;
-        }
+        const inFrac = Math.max(0, Math.min(1, localTime / tDur));
+        gain *= applyAudioFadeCurve(inFrac, xfadeCurve);
       }
     }
   }
@@ -344,6 +352,376 @@ export function evaluateAudioClipGain(
   }
 
   return Math.max(0, Math.min(2.2, gain));
+}
+
+export interface TrackMeterReading {
+  left: number;   // 0..1.25 linear
+  right: number;  // 0..1.25 linear
+  leftDb: number; // -60..+2 dBFS
+  rightDb: number;
+  clipping: boolean;
+}
+
+export interface MasterMeterSnapshot {
+  left: number;
+  right: number;
+  leftDb: number;
+  rightDb: number;
+  estimatedLufs: number;
+  clipping: boolean;
+  perTrack: Record<string, TrackMeterReading>;
+}
+
+export function linearToDb(linear: number): number {
+  if (!Number.isFinite(linear) || linear <= 0.0008) return -60;
+  return Math.max(-60, Math.min(3, 20 * Math.log10(linear)));
+}
+
+export function dbToMeterFraction(db: number, minDb = -48, maxDb = 0): number {
+  if (!Number.isFinite(db) || db <= minDb) return 0;
+  return Math.max(0, Math.min(1, (db - minDb) / (maxDb - minDb)));
+}
+
+/**
+ * Computes auto-normalized clip volume (0.1..2.0) based on the clip's waveform peak/RMS
+ * so quiet recordings are lifted and hot recordings are tamed cleanly toward targetPeak.
+ */
+export function computeClipNormalizeGain(waveform?: number[], targetPeak = 0.84): number {
+  if (!waveform || waveform.length === 0) return 1.0;
+  let peak = 0;
+  let sumSq = 0;
+  for (let i = 0; i < waveform.length; i++) {
+    const v = Math.abs(waveform[i] || 0);
+    if (v > peak) peak = v;
+    sumSq += v * v;
+  }
+  const rms = Math.sqrt(sumSq / waveform.length);
+  const effLevel = Math.max(peak * 0.72, rms * 1.45, 0.08);
+  return Number(Math.max(0.15, Math.min(2.0, targetPeak / effLevel)).toFixed(2));
+}
+
+/**
+ * Evaluates instantaneous Stereo L/R meter levels and dBFS readouts across all tracks and master bus
+ * using waveform sample energy, volume envelopes, fades, crossfades, ducking, pan, and normalization.
+ */
+export function computeStereoMetersAtTime(
+  tracks: TimelineTrack[],
+  clips: TimelineClip[],
+  playhead: number,
+  masterMuted: boolean,
+  isPlaying: boolean,
+  masterNormalizeEnabled = false,
+  masterTargetLufs = -14,
+): MasterMeterSnapshot {
+  const trackMap = new Map(tracks.map((t) => [t.id, t]));
+  const audioTracks = tracks.filter((t) => t.kind === 'audio');
+  const anyAudioSolo = audioTracks.some((t) => t.solo);
+  const perTrack: Record<string, TrackMeterReading> = {};
+
+  for (const t of tracks) {
+    perTrack[t.id] = { left: 0, right: 0, leftDb: -60, rightDb: -60, clipping: false };
+  }
+
+  if (masterMuted) {
+    return { left: 0, right: 0, leftDb: -60, rightDb: -60, estimatedLufs: -60, clipping: false, perTrack };
+  }
+
+  let masterSumL = 0;
+  let masterSumR = 0;
+
+  for (const clip of clips) {
+    if (clip.muted) continue;
+    const isAudible = clip.kind === 'audio' || (clip.kind === 'video' && clip.hasAudio);
+    if (!isAudible) continue;
+    if (playhead < clip.startTime || playhead > clip.startTime + clip.duration) continue;
+
+    const trk = trackMap.get(clip.trackId);
+    if (!trk || trk.muted || trk.hidden) continue;
+
+    const folder = trk.parentFolderId ? trackMap.get(trk.parentFolderId) : undefined;
+    if (folder?.muted) continue;
+    if (trk.kind === 'audio' && anyAudioSolo && !trk.solo && !folder?.solo) continue;
+
+    const localTime = Math.max(0, playhead - clip.startTime);
+    const folderVol = folder ? folder.volume : 1;
+    const gain = evaluateAudioClipGain(clip, localTime, trk.volume, folderVol, clips, tracks);
+
+    let sampleEnergy = 0.42;
+    if (clip.waveform && clip.waveform.length > 0) {
+      const frac = Math.max(0, Math.min(0.999, localTime / Math.max(0.1, clip.duration)));
+      const fIdx = frac * (clip.waveform.length - 1);
+      const lo = Math.floor(fIdx);
+      const hi = Math.min(clip.waveform.length - 1, lo + 1);
+      const alpha = fIdx - lo;
+      const wSample = (clip.waveform[lo] ?? 0.35) * (1 - alpha) + (clip.waveform[hi] ?? 0.35) * alpha;
+      // Add subtle realistic micro-modulation while playing so sustained notes breathe naturally
+      const micro = isPlaying ? 0.92 + 0.08 * Math.sin(playhead * 29.5 + lo) : 1.0;
+      sampleEnergy = Math.max(0.03, wSample * micro);
+    } else if (isPlaying) {
+      sampleEnergy = 0.28 + 0.12 * Math.abs(Math.sin(playhead * 8.4));
+    }
+
+    // Track DSP normalize compensation estimate
+    let dspMult = 1.0;
+    if (trk.audioDsp?.normalizeEnabled) {
+      const tgt = trk.audioDsp.normalizeTargetLufs ?? -16;
+      dspMult *= Math.min(1.5, Math.max(0.75, Math.pow(10, (tgt + 18) / 40)));
+    }
+    if (trk.audioDsp?.compressorEnabled) {
+      dspMult *= 1.06;
+    }
+
+    const pan = Math.max(-1, Math.min(1, clip.pan || 0));
+    const panL = pan > 0 ? 1 - pan * 0.72 : 1;
+    const panR = pan < 0 ? 1 + pan * 0.72 : 1;
+
+    const ampL = Math.min(1.3, sampleEnergy * gain * dspMult * panL);
+    const ampR = Math.min(1.3, sampleEnergy * gain * dspMult * panR);
+
+    const trkCur = perTrack[trk.id] || { left: 0, right: 0, leftDb: -60, rightDb: -60, clipping: false };
+    const nextTrkL = Math.min(1.3, trkCur.left + ampL);
+    const nextTrkR = Math.min(1.3, trkCur.right + ampR);
+    perTrack[trk.id] = {
+      left: nextTrkL,
+      right: nextTrkR,
+      leftDb: linearToDb(nextTrkL),
+      rightDb: linearToDb(nextTrkR),
+      clipping: nextTrkL > 0.98 || nextTrkR > 0.98,
+    };
+
+    if (folder) {
+      const fCur = perTrack[folder.id] || { left: 0, right: 0, leftDb: -60, rightDb: -60, clipping: false };
+      const fL = Math.min(1.3, fCur.left + ampL);
+      const fR = Math.min(1.3, fCur.right + ampR);
+      perTrack[folder.id] = {
+        left: fL,
+        right: fR,
+        leftDb: linearToDb(fL),
+        rightDb: linearToDb(fR),
+        clipping: fL > 0.98 || fR > 0.98,
+      };
+    }
+
+    masterSumL += ampL;
+    masterSumR += ampR;
+  }
+
+  // Apply master loudness normalizer preview scaling if active
+  if (masterNormalizeEnabled && (masterSumL > 0.01 || masterSumR > 0.01)) {
+    const targetLinear = Math.pow(10, (masterTargetLufs + 2) / 20);
+    const curAvg = Math.max(0.05, (masterSumL + masterSumR) * 0.5);
+    const normFactor = Math.max(0.55, Math.min(1.65, targetLinear / curAvg));
+    masterSumL = Math.min(0.96, masterSumL * normFactor);
+    masterSumR = Math.min(0.96, masterSumR * normFactor);
+  }
+
+  const left = Math.min(1.25, masterSumL);
+  const right = Math.min(1.25, masterSumR);
+  const leftDb = linearToDb(left);
+  const rightDb = linearToDb(right);
+  const avgLin = (left + right) * 0.5;
+  const estimatedLufs = avgLin <= 0.001 ? -60 : Math.max(-60, Math.min(-3, linearToDb(avgLin) - 2.2));
+
+  return {
+    left,
+    right,
+    leftDb,
+    rightDb,
+    estimatedLufs,
+    clipping: left > 0.98 || right > 0.98,
+    perTrack,
+  };
+}
+
+export interface AudioSpectrumSnapshot {
+  bands: number[];
+  peakDb: number;
+  dominantHzLabel: string;
+  hasSignal: boolean;
+}
+
+const SPECTRUM_MIN_HZ = 36;
+const SPECTRUM_MAX_HZ = 15500;
+
+export function formatFrequencyHz(hz: number): string {
+  if (hz >= 1000) return `${(hz / 1000).toFixed(hz >= 10000 ? 0 : 1)} kHz`;
+  return `${Math.round(hz)} Hz`;
+}
+
+/**
+ * Computes a logarithmic multi-band RTA audio spectrum (36 Hz - 15.5 kHz) reflecting
+ * active clips' waveform amplitude, envelopes, fades, crossfades, ducking, BPM beat hits,
+ * Fairlight 3-band EQ curves, compression/reverb, and master normalization.
+ */
+export function computeAudioSpectrumBands(
+  tracks: TimelineTrack[],
+  clips: TimelineClip[],
+  playhead: number,
+  masterMuted: boolean,
+  isPlaying: boolean,
+  masterNormalizeEnabled = false,
+  masterTargetLufs = -14,
+  bandCount = 32,
+): AudioSpectrumSnapshot {
+  const safeBands = Math.max(12, Math.min(64, Math.round(bandCount)));
+  const bands = new Array<number>(safeBands).fill(0);
+
+  if (masterMuted || clips.length === 0) {
+    return { bands, peakDb: -60, dominantHzLabel: '--', hasSignal: false };
+  }
+
+  const trackMap = new Map(tracks.map((t) => [t.id, t]));
+  const audioTracks = tracks.filter((t) => t.kind === 'audio');
+  const anyAudioSolo = audioTracks.some((t) => t.solo);
+
+  let anySignal = false;
+  let totalEnergyPreNorm = 0;
+
+  for (let cIdx = 0; cIdx < clips.length; cIdx++) {
+    const clip = clips[cIdx];
+    if (clip.muted) continue;
+    const isAudible = clip.kind === 'audio' || (clip.kind === 'video' && clip.hasAudio);
+    if (!isAudible) continue;
+    if (playhead < clip.startTime || playhead > clip.startTime + clip.duration) continue;
+
+    const trk = trackMap.get(clip.trackId);
+    if (!trk || trk.muted || trk.hidden) continue;
+
+    const folder = trk.parentFolderId ? trackMap.get(trk.parentFolderId) : undefined;
+    if (folder?.muted) continue;
+    if (trk.kind === 'audio' && anyAudioSolo && !trk.solo && !folder?.solo) continue;
+
+    const localTime = Math.max(0, playhead - clip.startTime);
+    const folderVol = folder ? folder.volume : 1;
+    const gain = evaluateAudioClipGain(clip, localTime, trk.volume, folderVol, clips, tracks);
+    if (gain <= 0.002) continue;
+
+    let sampleEnergy = 0.36;
+    let localSlope = 0;
+    if (clip.waveform && clip.waveform.length > 0) {
+      const frac = Math.max(0, Math.min(0.999, localTime / Math.max(0.1, clip.duration)));
+      const fIdx = frac * (clip.waveform.length - 1);
+      const lo = Math.floor(fIdx);
+      const hi = Math.min(clip.waveform.length - 1, lo + 1);
+      const prevIdx = Math.max(0, lo - 1);
+      const alpha = fIdx - lo;
+      const wSample = (clip.waveform[lo] ?? 0.35) * (1 - alpha) + (clip.waveform[hi] ?? 0.35) * alpha;
+      const wPrev = clip.waveform[prevIdx] ?? wSample;
+      localSlope = Math.max(-0.5, Math.min(0.6, wSample - wPrev));
+      const micro = isPlaying ? 0.9 + 0.1 * Math.sin(playhead * 27.3 + lo * 0.7) : 1.0;
+      sampleEnergy = Math.max(0.03, wSample * micro);
+    } else if (isPlaying) {
+      sampleEnergy = 0.28 + 0.1 * Math.abs(Math.sin(playhead * 7.8 + cIdx));
+    }
+
+    // Check proximity to nearest beat marker for low-end kick & high-hat transient weighting
+    let beatKick = 0;
+    if (clip.beats && clip.beats.length > 0) {
+      const srcT = clip.trimStart + localTime * (clip.speed || 1);
+      for (let bi = 0; bi < clip.beats.length; bi++) {
+        const dt = srcT - clip.beats[bi];
+        if (dt >= -0.04 && dt <= 0.24) {
+          beatKick = Math.max(beatKick, Math.exp(-Math.max(0, dt) * 14));
+          break;
+        }
+      }
+    }
+
+    const dsp = trk.audioDsp;
+    let dspMult = 1.0;
+    if (dsp?.normalizeEnabled) {
+      const tgt = dsp.normalizeTargetLufs ?? -16;
+      dspMult *= Math.min(1.5, Math.max(0.75, Math.pow(10, (tgt + 18) / 40)));
+    }
+    if (dsp?.compressorEnabled) {
+      dspMult *= 1.08;
+    }
+
+    const eqLowGain = dsp ? Math.pow(10, Math.max(-12, Math.min(12, dsp.eqLowDb)) / 24) : 1;
+    const eqMidGain = dsp ? Math.pow(10, Math.max(-12, Math.min(12, dsp.eqMidDb)) / 24) : 1;
+    const eqHighGain = dsp ? Math.pow(10, Math.max(-12, Math.min(12, dsp.eqHighDb)) / 24) : 1;
+    const reverbLift = dsp?.reverbMix ? dsp.reverbMix * 0.16 : 0;
+
+    const baseAmp = Math.min(1.35, sampleEnergy * gain * dspMult);
+    totalEnergyPreNorm += baseAmp;
+    anySignal = true;
+
+    const isDialogue =
+      clip.kind === 'video' || /voice|adr|dialog|vocal|speech/i.test(`${clip.name} ${trk.name}`);
+
+    for (let b = 0; b < safeBands; b++) {
+      const u = b / Math.max(1, safeBands - 1);
+      const hz = SPECTRUM_MIN_HZ * Math.pow(SPECTRUM_MAX_HZ / SPECTRUM_MIN_HZ, u);
+
+      // Base musical spectral tilt + voice presence hump for dialogue/ADR
+      let shape: number;
+      if (isDialogue) {
+        const vocalFocus = Math.exp(-Math.pow((u - 0.46) / 0.24, 2));
+        const subCut = u < 0.16 ? 0.35 + u * 3 : 1.0;
+        shape = (0.34 + 0.66 * vocalFocus) * subCut;
+      } else {
+        const bassWeight = 0.88 * Math.exp(-u * 1.15);
+        const bodyWeight = 0.56 * Math.exp(-Math.pow((u - 0.38) / 0.28, 2));
+        const airWeight = 0.26 * Math.exp(-Math.pow((u - 0.78) / 0.22, 2));
+        shape = 0.2 + bassWeight + bodyWeight + airWeight;
+      }
+
+      // Transient edge boosts upper frequencies naturally; beat hits punch sub/low-bass
+      const transientBoost = Math.max(0, localSlope) * (0.4 + 0.9 * u);
+      const beatBoost = beatKick * (u < 0.26 ? 0.42 * (1 - u * 2.5) : u > 0.72 ? 0.2 : 0.06);
+
+      // Smooth multi-harmonic dance tied to playhead & band frequency
+      const phaseRate = isPlaying ? 1 : 0.35;
+      const harmonic =
+        0.74 +
+        0.16 * Math.sin(playhead * (5.2 + b * 0.55) * phaseRate + cIdx * 1.7 + b * 0.6) +
+        0.1 * Math.cos(playhead * (11.7 + b * 0.31) * phaseRate - b * 0.85);
+
+      // Blend 3-band EQ crossover curves
+      const wLow = hz < 260 ? 1 - Math.max(0, hz - 90) / 170 : 0;
+      const wHigh = hz > 2400 ? Math.min(1, (hz - 2400) / 3600) : 0;
+      const wMid = Math.max(0, 1 - wLow - wHigh);
+      const eqMult = eqLowGain * wLow + eqMidGain * wMid + eqHighGain * wHigh;
+
+      const bandEnergy =
+        (baseAmp * shape * harmonic + transientBoost * gain + beatBoost * gain + reverbLift * baseAmp * wMid) *
+        eqMult;
+      bands[b] = Math.min(1.25, bands[b] + bandEnergy);
+    }
+  }
+
+  if (!anySignal) {
+    return { bands, peakDb: -60, dominantHzLabel: '--', hasSignal: false };
+  }
+
+  if (masterNormalizeEnabled && totalEnergyPreNorm > 0.01) {
+    const targetLinear = Math.pow(10, (masterTargetLufs + 2) / 20);
+    const normFactor = Math.max(0.58, Math.min(1.62, targetLinear / Math.max(0.06, totalEnergyPreNorm)));
+    for (let b = 0; b < safeBands; b++) {
+      bands[b] *= normFactor;
+    }
+  }
+
+  let peakVal = 0;
+  let peakIdx = 0;
+  for (let b = 0; b < safeBands; b++) {
+    const clamped = Math.max(0, Math.min(1, bands[b]));
+    bands[b] = clamped;
+    if (clamped > peakVal) {
+      peakVal = clamped;
+      peakIdx = b;
+    }
+  }
+
+  const domHz =
+    SPECTRUM_MIN_HZ * Math.pow(SPECTRUM_MAX_HZ / SPECTRUM_MIN_HZ, peakIdx / Math.max(1, safeBands - 1));
+
+  return {
+    bands,
+    peakDb: linearToDb(peakVal),
+    dominantHzLabel: peakVal > 0.02 ? formatFrequencyHz(domHz) : '--',
+    hasSignal: peakVal > 0.01,
+  };
 }
 
 export function sanitizeClipCrop(raw?: Partial<ClipCrop> | null): ClipCrop {
@@ -751,6 +1129,13 @@ export function splitClipAtTime(clip: TimelineClip, splitTime: number): [Timelin
     effects: { ...clip.effects },
     crop: clip.crop ? { ...clip.crop } : undefined,
     colorGrade: clip.colorGrade ? { ...clip.colorGrade } : undefined,
+    title: clip.title ? { ...clip.title } : undefined,
+    fusion: clip.fusion
+      ? {
+          ...clip.fusion,
+          rotoscopePoints: clip.fusion.rotoscopePoints.map((p) => ({ ...p })),
+        }
+      : undefined,
     keyframes: firstKf,
     volumeEnvelope: firstEnv,
   };
@@ -766,6 +1151,13 @@ export function splitClipAtTime(clip: TimelineClip, splitTime: number): [Timelin
     effects: { ...clip.effects },
     crop: clip.crop ? { ...clip.crop } : undefined,
     colorGrade: clip.colorGrade ? { ...clip.colorGrade } : undefined,
+    title: clip.title ? { ...clip.title } : undefined,
+    fusion: clip.fusion
+      ? {
+          ...clip.fusion,
+          rotoscopePoints: clip.fusion.rotoscopePoints.map((p) => ({ ...p })),
+        }
+      : undefined,
     keyframes: secondKf,
     volumeEnvelope: secondEnv,
   };
@@ -892,6 +1284,18 @@ export function extractTimelineRange(
           name: `${c.name} (2)`,
           startTime: Number(rightStart.toFixed(3)),
           duration: rightDur,
+          effects: { ...c.effects },
+          crop: c.crop ? { ...c.crop } : undefined,
+          colorGrade: c.colorGrade ? { ...c.colorGrade } : undefined,
+          title: c.title ? { ...c.title } : undefined,
+          fusion: c.fusion
+            ? {
+                ...c.fusion,
+                rotoscopePoints: c.fusion.rotoscopePoints.map((p) => ({ ...p })),
+              }
+            : undefined,
+          keyframes: cloneClipKeyframes(c.keyframes),
+          volumeEnvelope: cloneVolumeEnvelope(c.volumeEnvelope),
           trimStart:
             c.kind === 'video' || c.kind === 'audio'
               ? Number((c.trimStart + cutOffset * c.speed).toFixed(3))
@@ -1030,6 +1434,134 @@ export function autoAssembleTimeline(
   }
 
   return { clips: normalizeTimelineTransitions(clips) };
+}
+
+export interface QuickAutoSelectOptions {
+  transitionStyle: AutoAssembleOptions['transitionStyle'];
+  transitionDuration: number;
+  clipOpacity: number;
+  autoOpacityFade: boolean;
+  audioMode: 'auto' | 'none' | string; // 'auto' picks best audio asset, 'none' skips audio, else assetId
+  loopMusic: boolean;
+  enableMotion: boolean;
+  autoNormalize: boolean;
+  targetLufs: number;
+}
+
+export function autoBuildQuickRenderTimeline(
+  assets: MediaAsset[],
+  options: QuickAutoSelectOptions,
+  targetVideoTrackId = 'trk_v1',
+  targetAudioTrackId = 'trk_a1',
+): {
+  clips: TimelineClip[];
+  selectedAudioName: string | null;
+  visualCount: number;
+  audioSegmentCount: number;
+} {
+  const visuals = assets.filter((a) => a.mediaType === 'image' || a.mediaType === 'video');
+  const audios = assets.filter((a) => a.mediaType === 'audio');
+
+  let chosenAudio: MediaAsset | null = null;
+  if (options.audioMode === 'auto') {
+    chosenAudio = audios.find((a) => (a.beats?.length || 0) >= 2) || audios[0] || null;
+  } else if (options.audioMode !== 'none') {
+    chosenAudio = audios.find((a) => a.id === options.audioMode) || audios[0] || null;
+  }
+
+  if (visuals.length === 0 && !chosenAudio) {
+    return { clips: [], selectedAudioName: null, visualCount: 0, audioSegmentCount: 0 };
+  }
+
+  const base = autoAssembleTimeline(
+    visuals,
+    chosenAudio,
+    {
+      beatStride: 2,
+      transitionStyle: options.transitionStyle,
+      transitionDuration: options.transitionDuration,
+      enableMotion: options.enableMotion,
+    },
+    targetVideoTrackId,
+    targetAudioTrackId,
+  );
+
+  const clampedOpacity = Math.max(0.2, Math.min(1, options.clipOpacity));
+  const anyVisualWithAudio = visuals.some((v) => v.mediaType === 'video' && v.hasAudio);
+  const targetPeak = options.targetLufs <= -20 ? 0.72 : options.targetLufs <= -15 ? 0.82 : 0.88;
+
+  const visualClips: TimelineClip[] = [];
+  for (const c of base.clips) {
+    if (c.kind === 'audio') continue;
+    visualClips.push({
+      ...c,
+      opacity: Number(clampedOpacity.toFixed(2)),
+      fadeIn: options.autoOpacityFade ? Number(Math.min(0.35, c.duration * 0.2).toFixed(2)) : 0,
+      fadeOut: options.autoOpacityFade ? Number(Math.min(0.35, c.duration * 0.2).toFixed(2)) : 0,
+      // Keep original video dialogue audible & clear if no BGM or if we want auto-ducked music
+      muted: Boolean(chosenAudio && !c.hasAudio),
+    });
+  }
+
+  // If user only had audio and 0 visual assets, create a 10s-friendly audio timeline
+  const totalVisualDur = Math.max(
+    computeTimelineDuration(visualClips),
+    visualClips.length === 0 && chosenAudio ? Math.min(24, Math.max(4, chosenAudio.duration || 12)) : 0,
+  );
+
+  const audioClips: TimelineClip[] = [];
+  if (chosenAudio && totalVisualDur > 0.2) {
+    const songDur = Math.max(1.5, chosenAudio.duration || totalVisualDur);
+    const normVol = options.autoNormalize
+      ? computeClipNormalizeGain(chosenAudio.waveform, targetPeak)
+      : 1.0;
+
+    if (!options.loopMusic || songDur >= totalVisualDur - 0.1) {
+      const aClip = createClipFromAsset(chosenAudio, targetAudioTrackId, 0, false);
+      aClip.duration = Number(Math.min(songDur, totalVisualDur).toFixed(3));
+      aClip.volume = normVol;
+      aClip.fadeIn = options.autoOpacityFade ? 0.45 : 0.2;
+      aClip.fadeOut = Number(Math.min(1.6, aClip.duration * 0.18).toFixed(2));
+      aClip.audioFadeCurve = 'scurve';
+      aClip.backgroundDucking = anyVisualWithAudio;
+      aClip.duckLevel = 0.28;
+      audioClips.push(aClip);
+    } else {
+      // Auto-loop music seamlessly across the entire timeline with overlapping S-Curve Equal-Power crossfades
+      let cursor = 0;
+      let segIdx = 0;
+      const overlapDur = songDur > 2.2 ? Number(Math.min(0.85, songDur * 0.25).toFixed(2)) : 0;
+      while (cursor < totalVisualDur - 0.15 && segIdx < 16) {
+        const remaining = totalVisualDur - cursor;
+        const segDur = Number(Math.min(songDur, remaining).toFixed(3));
+        const isLast = cursor + segDur >= totalVisualDur - 0.12 || segIdx === 15;
+        const effXfade = !isLast && overlapDur > 0.1 && segDur > overlapDur * 1.5 ? overlapDur : 0;
+        const aClip = createClipFromAsset(chosenAudio, targetAudioTrackId, cursor, false);
+        aClip.name = segIdx === 0 ? chosenAudio.name : `${chosenAudio.name} (Loop ${segIdx + 1})`;
+        aClip.duration = segDur;
+        aClip.volume = normVol;
+        aClip.fadeIn = segIdx === 0 ? (options.autoOpacityFade ? 0.45 : 0.2) : 0;
+        aClip.fadeOut = isLast ? Number(Math.min(1.6, segDur * 0.22).toFixed(2)) : 0;
+        aClip.audioFadeCurve = 'scurve';
+        aClip.audioTransitionOut = effXfade > 0 ? 'crossfade_eq' : 'cut';
+        aClip.audioCrossfadeCurve = 'scurve';
+        aClip.audioTransitionDuration = effXfade;
+        aClip.backgroundDucking = anyVisualWithAudio;
+        aClip.duckLevel = 0.28;
+        audioClips.push(aClip);
+        const advance = Math.max(0.4, segDur - effXfade);
+        cursor = Number((cursor + advance).toFixed(3));
+        segIdx += 1;
+      }
+    }
+  }
+
+  return {
+    clips: normalizeTimelineTransitions([...visualClips, ...audioClips]),
+    selectedAudioName: chosenAudio?.name || null,
+    visualCount: visualClips.length,
+    audioSegmentCount: audioClips.length,
+  };
 }
 
 export function resolveEffectiveColorGrade(cg: ColorGradeConfig): {

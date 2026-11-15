@@ -38,14 +38,15 @@ import {
 import {
   applyAudioFadeCurve,
   computeTimelineDuration,
-  evaluateAudioEnvelopeGain,
   formatFrameTimecode,
 } from '../utils/timelineMath';
+import { AudioClipWaveform } from './AudioClipWaveform';
 
 const AUDIO_TRANSITION_LABELS: Record<AudioTransitionType, string> = {
   cut: 'Cut',
-  crossfade_eq: 'Crossfade (Eq)',
-  crossfade_lin: 'Linear Crossfade',
+  crossfade_eq: 'Crossfade (S-Curve)',
+  crossfade_lin: 'Crossfade (Linear)',
+  crossfade_exp: 'Crossfade (Exp)',
   dip_swell: 'Dip & Swell',
 };
 
@@ -128,23 +129,30 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
   const [renameDraft, setRenameDraft] = useState<string>('');
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
   const trackRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const inlineSliderCommittedRef = useRef<boolean>(false);
 
   const totalDuration = useMemo(() => computeTimelineDuration(clips), [clips]);
   const effectiveSnap = snapEnabled && !freeformRoughCut;
 
-  // Collect beat markers from audio clips
+  // Collect beat markers from audio clips aligned with trimStart, speed, and reverse
   const beatMarkers = useMemo(() => {
     const markers: number[] = [];
     for (const c of clips) {
-      if (c.kind !== 'audio' || !c.beats) continue;
-      for (const b of c.beats) {
-        if (b >= c.trimStart && b <= c.trimStart + c.duration) {
-          markers.push(Number((c.startTime + (b - c.trimStart)).toFixed(3)));
+      if (c.kind !== 'audio') continue;
+      const beats = c.beats && c.beats.length > 0 ? c.beats : c.mediaId ? assetsMap.get(c.mediaId)?.beats : undefined;
+      if (!beats || beats.length === 0) continue;
+      const speed = Math.max(0.1, c.speed || 1);
+      const trimStart = Math.max(0, c.trimStart || 0);
+      const srcEnd = trimStart + c.duration * speed;
+      for (const b of beats) {
+        if (b >= trimStart && b <= srcEnd) {
+          const localT = c.reverse ? c.duration - (b - trimStart) / speed : (b - trimStart) / speed;
+          markers.push(Number((c.startTime + localT).toFixed(3)));
         }
       }
     }
     return markers;
-  }, [clips]);
+  }, [clips, assetsMap]);
 
   // Snap points: playhead + clip edges + beat markers
   const snapPoints = useMemo(() => {
@@ -396,7 +404,9 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
 
   const commitTrackRename = (trackId: string) => {
     const clean = renameDraft.trim();
-    if (clean) {
+    const current = tracks.find((t) => t.id === trackId);
+    if (clean && current && clean !== current.name) {
+      onCommitHistory();
       onUpdateTrack(trackId, { name: clean });
     }
     setRenamingTrackId(null);
@@ -555,16 +565,16 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
   const audioTrackCount = audioTracks.length;
 
   return (
-    <section className="flex flex-col bg-[#14171d] border border-[#232832] rounded-lg overflow-hidden">
+    <section className="flex flex-col bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg overflow-hidden shadow-xs dark:shadow-none">
       {/* Toolbar: Endless Workspace & Boundless Tracks */}
-      <div className="px-3.5 py-2 border-b border-[#232832] bg-[#171b22] flex flex-wrap items-center justify-between gap-2">
+      <div className="px-3.5 py-2 border-b border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#171b22] flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
           <div className="flex items-center gap-1.5 mr-1">
-            <Layers className="w-3.5 h-3.5 text-blue-400" />
-            <span className="text-xs font-semibold text-slate-100">
+            <Layers className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+            <span className="text-xs font-semibold text-slate-900 dark:text-slate-100">
               Endless Workspace
             </span>
-            <span className="text-[10px] text-slate-400 font-mono-tabular">
+            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono-tabular">
               · {baseVideoCount}V · {overlayLayerCount}OL · {audioTrackCount}A
             </span>
           </div>
@@ -573,27 +583,27 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
             type="button"
             onClick={() => onAddTrack('video', 'overlay')}
             title="Stack an unlimited overlay layer above your video tracks"
-            className="px-2 py-1 rounded bg-[#1d222b] hover:bg-[#262d39] border border-purple-500/40 text-[11px] font-medium text-slate-200 flex items-center gap-1 cursor-pointer"
+            className="px-2 py-1 rounded bg-white hover:bg-slate-100 dark:bg-[#1d222b] dark:hover:bg-[#262d39] border border-purple-400/60 dark:border-purple-500/40 text-[11px] font-medium text-slate-800 dark:text-slate-200 flex items-center gap-1 cursor-pointer"
           >
-            <Plus className="w-3 h-3 text-purple-400" />
+            <Plus className="w-3 h-3 text-purple-600 dark:text-purple-400" />
             <span>Overlay Layer</span>
           </button>
           <button
             type="button"
             onClick={() => onAddTrack('video', 'video')}
             title="Stack an unlimited video track vertically"
-            className="px-2 py-1 rounded bg-[#1d222b] hover:bg-[#262d39] border border-[#2c3340] text-[11px] font-medium text-slate-200 flex items-center gap-1 cursor-pointer"
+            className="px-2 py-1 rounded bg-white hover:bg-slate-100 dark:bg-[#1d222b] dark:hover:bg-[#262d39] border border-slate-300 dark:border-[#2c3340] text-[11px] font-medium text-slate-800 dark:text-slate-200 flex items-center gap-1 cursor-pointer"
           >
-            <Plus className="w-3 h-3 text-blue-400" />
+            <Plus className="w-3 h-3 text-blue-600 dark:text-blue-400" />
             <span>Video Track</span>
           </button>
           <button
             type="button"
             onClick={() => onAddTrack('audio', 'audio')}
             title="Stack an unlimited audio track vertically"
-            className="px-2 py-1 rounded bg-[#1d222b] hover:bg-[#262d39] border border-[#2c3340] text-[11px] font-medium text-slate-200 flex items-center gap-1 cursor-pointer"
+            className="px-2 py-1 rounded bg-white hover:bg-slate-100 dark:bg-[#1d222b] dark:hover:bg-[#262d39] border border-slate-300 dark:border-[#2c3340] text-[11px] font-medium text-slate-800 dark:text-slate-200 flex items-center gap-1 cursor-pointer"
           >
-            <Plus className="w-3 h-3 text-emerald-400" />
+            <Plus className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
             <span>Audio Track</span>
           </button>
           <button
@@ -601,18 +611,18 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
             onClick={onSplitAtPlayhead}
             disabled={clips.length === 0}
             title="Split clip at playhead (S)"
-            className="px-2.5 py-1 rounded bg-[#1d222b] hover:bg-blue-600 border border-[#2c3340] text-[11px] font-medium text-slate-200 hover:text-white disabled:opacity-40 flex items-center gap-1 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            className="px-2.5 py-1 rounded bg-white hover:bg-blue-600 dark:bg-[#1d222b] dark:hover:bg-blue-600 border border-slate-300 dark:border-[#2c3340] text-[11px] font-medium text-slate-800 dark:text-slate-200 hover:text-white disabled:opacity-40 flex items-center gap-1 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Scissors className="w-3 h-3" />
             <span>Split (S)</span>
           </button>
-          <div className="flex items-center gap-0.5 border-l border-[#2c3340] pl-2">
+          <div className="flex items-center gap-0.5 border-l border-slate-300 dark:border-[#2c3340] pl-2">
             <button
               type="button"
               onClick={onUndo}
               disabled={!canUndo}
               title="Undo (Ctrl+Z)"
-              className="p-1.5 rounded bg-[#1d222b] hover:bg-[#262d39] border border-[#2c3340] text-slate-200 disabled:opacity-35 transition-colors cursor-pointer"
+              className="p-1.5 rounded bg-white hover:bg-slate-100 dark:bg-[#1d222b] dark:hover:bg-[#262d39] border border-slate-300 dark:border-[#2c3340] text-slate-700 dark:text-slate-200 disabled:opacity-35 transition-colors cursor-pointer"
             >
               <Undo2 className="w-3 h-3" />
             </button>
@@ -621,7 +631,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
               onClick={onRedo}
               disabled={!canRedo}
               title="Redo (Ctrl+Shift+Z)"
-              className="p-1.5 rounded bg-[#1d222b] hover:bg-[#262d39] border border-[#2c3340] text-slate-200 disabled:opacity-35 transition-colors cursor-pointer"
+              className="p-1.5 rounded bg-white hover:bg-slate-100 dark:bg-[#1d222b] dark:hover:bg-[#262d39] border border-slate-300 dark:border-[#2c3340] text-slate-700 dark:text-slate-200 disabled:opacity-35 transition-colors cursor-pointer"
             >
               <Redo2 className="w-3 h-3" />
             </button>
@@ -636,8 +646,8 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
               title="Zero-restriction Freeform Rough Cut: disables snap constraints and opens extended horizontal space"
               className={`px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1 border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 freeformRoughCut
-                  ? 'bg-emerald-500/20 border-emerald-500/70 text-emerald-200'
-                  : 'bg-[#101318] border-[#262c38] text-slate-300 hover:text-white'
+                  ? 'bg-emerald-50 dark:bg-emerald-500/20 border-emerald-500/70 text-emerald-700 dark:text-emerald-200'
+                  : 'bg-white dark:bg-[#101318] border-slate-300 dark:border-[#262c38] text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
               <InfinityIcon className="w-3.5 h-3.5" />
@@ -650,8 +660,8 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
             title="When enabled, deleting a clip automatically closes the gap on that track"
             className={`px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1 border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
               rippleMode
-                ? 'bg-amber-500/20 border-amber-500/70 text-amber-200'
-                : 'bg-[#101318] border-[#262c38] text-slate-400 hover:text-slate-200'
+                ? 'bg-amber-50 dark:bg-amber-500/20 border-amber-500/70 text-amber-800 dark:text-amber-200'
+                : 'bg-white dark:bg-[#101318] border-slate-300 dark:border-[#262c38] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
             <ArrowLeftRight className="w-3 h-3" />
@@ -662,8 +672,8 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
             onClick={() => setSnapEnabled((s) => !s)}
             className={`px-2.5 py-1 rounded text-xs font-medium flex items-center gap-1 border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
               effectiveSnap
-                ? 'bg-blue-600/20 border-blue-500 text-blue-200'
-                : 'bg-[#101318] border-[#262c38] text-slate-400 hover:text-slate-200'
+                ? 'bg-blue-50 dark:bg-blue-600/20 border-blue-500 text-blue-700 dark:text-blue-200'
+                : 'bg-white dark:bg-[#101318] border-slate-300 dark:border-[#262c38] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
             <Magnet className="w-3 h-3" />
@@ -676,8 +686,8 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
             title="Toggle compact layer height to view more stacked tracks simultaneously"
             className={`px-2 py-1 rounded text-[11px] font-medium flex items-center gap-1 border transition-colors whitespace-nowrap cursor-pointer ${
               compactRows
-                ? 'bg-[#1c2536] border-blue-500/60 text-blue-200'
-                : 'bg-[#101318] border-[#262c38] text-slate-400 hover:text-slate-200'
+                ? 'bg-blue-50 dark:bg-[#1c2536] border-blue-500/60 text-blue-700 dark:text-blue-200'
+                : 'bg-white dark:bg-[#101318] border-slate-300 dark:border-[#262c38] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
             <Rows3 className="w-3 h-3" />
@@ -688,27 +698,27 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
             type="button"
             onClick={() => setStackHeight((h) => (h >= 460 ? 320 : 500))}
             title="Expand / collapse vertical Boundless Tracks stack viewport"
-            className="px-2 py-1 rounded bg-[#101318] border border-[#262c38] text-[11px] font-medium text-slate-300 hover:text-white cursor-pointer"
+            className="px-2 py-1 rounded bg-white dark:bg-[#101318] border border-slate-300 dark:border-[#262c38] text-[11px] font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white cursor-pointer"
           >
             {stackHeight >= 460 ? 'Normal H' : 'Tall Stack'}
           </button>
 
-          <div className="flex items-center gap-1 bg-[#101318] border border-[#262c38] rounded px-1.5 py-0.5">
+          <div className="flex items-center gap-1 bg-white dark:bg-[#101318] border border-slate-300 dark:border-[#262c38] rounded px-1.5 py-0.5">
             <button
               type="button"
               onClick={() => setPxPerSec((p) => Math.max(20, p - 14))}
-              className="p-1 text-slate-400 hover:text-white cursor-pointer"
+              className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
               title="Zoom out"
             >
               <ZoomOut className="w-3.5 h-3.5" />
             </button>
-            <span className="text-[11px] text-slate-400 font-mono-tabular w-10 text-center">
+            <span className="text-[11px] text-slate-600 dark:text-slate-400 font-mono-tabular w-10 text-center">
               {pxPerSec}px
             </span>
             <button
               type="button"
               onClick={() => setPxPerSec((p) => Math.min(180, p + 14))}
-              className="p-1 text-slate-400 hover:text-white cursor-pointer"
+              className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
               title="Zoom in"
             >
               <ZoomIn className="w-3.5 h-3.5" />
@@ -716,7 +726,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
             <button
               type="button"
               onClick={handleZoomToFit}
-              className="p-1 text-slate-400 hover:text-white border-l border-[#262c38] pl-1.5 cursor-pointer"
+              className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border-l border-slate-200 dark:border-[#262c38] pl-1.5 cursor-pointer"
               title="Zoom to fit entire project"
             >
               <Maximize2 className="w-3 h-3" />
@@ -727,22 +737,23 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
 
       {/* Inline Transition Bar */}
       {transitionClip && (
-        <div className="px-4 py-2 bg-[#111824] border-b border-blue-500/30 flex flex-wrap items-center justify-between gap-3">
+        <div className="px-4 py-2 bg-blue-50 dark:bg-[#111824] border-b border-blue-200 dark:border-blue-500/30 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3 text-xs">
-            <span className="font-medium text-blue-200">
+            <span className="font-medium text-blue-700 dark:text-blue-200">
               Transition after “{transitionClip.name}”
             </span>
             <select
               aria-label="Transitions"
               value={transitionClip.transitionOut}
-              onChange={(e) =>
+              onChange={(e) => {
+                onCommitHistory();
                 onUpdateClip(transitionClip.id, {
                   transitionOut: e.target.value as TransitionType,
                   transitionDuration:
                     e.target.value === 'cut' ? 0 : Math.max(0.25, transitionClip.transitionDuration || 0.45),
-                })
-              }
-              className="h-7 px-2 rounded bg-[#0c1017] border border-[#2d384b] text-slate-100"
+                });
+              }}
+              className="h-7 px-2 rounded bg-white dark:bg-[#0c1017] border border-blue-300 dark:border-[#2d384b] text-slate-900 dark:text-slate-100"
             >
               {TRANSITION_GROUPS.map((groupName) => (
                 <optgroup key={groupName} label={groupName}>
@@ -754,7 +765,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                 </optgroup>
               ))}
             </select>
-            <label className="flex items-center gap-2 text-slate-300">
+            <label className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
               <span>Duration</span>
               <input
                 type="range"
@@ -763,9 +774,22 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                 step={0.05}
                 disabled={transitionClip.transitionOut === 'cut'}
                 value={transitionClip.transitionDuration}
-                onChange={(e) =>
-                  onUpdateClip(transitionClip.id, { transitionDuration: Number(e.target.value) })
-                }
+                onChange={(e) => {
+                  if (!inlineSliderCommittedRef.current) {
+                    onCommitHistory();
+                    inlineSliderCommittedRef.current = true;
+                  }
+                  onUpdateClip(transitionClip.id, { transitionDuration: Number(e.target.value) });
+                }}
+                onPointerUp={() => {
+                  inlineSliderCommittedRef.current = false;
+                }}
+                onPointerCancel={() => {
+                  inlineSliderCommittedRef.current = false;
+                }}
+                onBlur={() => {
+                  inlineSliderCommittedRef.current = false;
+                }}
                 className="studio-slider w-24"
               />
               <span className="font-mono-tabular w-10">
@@ -778,7 +802,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
           <button
             type="button"
             onClick={() => setEditingTransitionClipId(null)}
-            className="px-2.5 py-1 rounded bg-[#1d2636] hover:bg-[#273348] text-xs text-slate-200 cursor-pointer"
+            className="px-2.5 py-1 rounded bg-blue-600/15 hover:bg-blue-600/25 dark:bg-[#1d2636] dark:hover:bg-[#273348] text-xs text-blue-700 dark:text-slate-200 cursor-pointer"
           >
             Done
           </button>
@@ -787,9 +811,9 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
 
       {/* Inline Audio Transition Bar */}
       {audioTransitionClip && (
-        <div className="px-4 py-2 bg-[#0f1d18] border-b border-emerald-500/35 flex flex-wrap items-center justify-between gap-3">
+        <div className="px-4 py-2 bg-emerald-50 dark:bg-[#0f1d18] border-b border-emerald-200 dark:border-emerald-500/35 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3 text-xs">
-            <span className="font-medium text-emerald-200">
+            <span className="font-medium text-emerald-700 dark:text-emerald-200">
               Music Transition after “{audioTransitionClip.name}”
             </span>
             <select
@@ -800,18 +824,25 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                 onCommitHistory();
                 onUpdateClip(audioTransitionClip.id, {
                   audioTransitionOut: nextType,
+                  audioCrossfadeCurve:
+                    nextType === 'crossfade_lin'
+                      ? 'linear'
+                      : nextType === 'crossfade_exp'
+                        ? 'exp'
+                        : 'scurve',
                   audioTransitionDuration:
                     nextType === 'cut' ? 0 : Math.max(0.4, audioTransitionClip.audioTransitionDuration || 1.2),
                 });
               }}
-              className="h-7 px-2 rounded bg-[#0c1017] border border-emerald-800 text-slate-100"
+              className="h-7 px-2 rounded bg-white dark:bg-[#0c1017] border border-emerald-300 dark:border-emerald-800 text-slate-900 dark:text-slate-100"
             >
               <option value="cut">Hard Cut</option>
-              <option value="crossfade_eq">Equal-Power Crossfade (Smooth)</option>
+              <option value="crossfade_eq">S-Curve Crossfade (Smooth)</option>
               <option value="crossfade_lin">Linear Crossfade</option>
+              <option value="crossfade_exp">Exponential Crossfade</option>
               <option value="dip_swell">Dip &amp; Swell Transition</option>
             </select>
-            <label className="flex items-center gap-2 text-slate-300">
+            <label className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
               <span>Crossfade Length</span>
               <input
                 type="range"
@@ -820,11 +851,24 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                 step={0.1}
                 disabled={(audioTransitionClip.audioTransitionOut || 'cut') === 'cut'}
                 value={audioTransitionClip.audioTransitionDuration ?? 1.2}
-                onChange={(e) =>
+                onChange={(e) => {
+                  if (!inlineSliderCommittedRef.current) {
+                    onCommitHistory();
+                    inlineSliderCommittedRef.current = true;
+                  }
                   onUpdateClip(audioTransitionClip.id, {
                     audioTransitionDuration: Number(e.target.value),
-                  })
-                }
+                  });
+                }}
+                onPointerUp={() => {
+                  inlineSliderCommittedRef.current = false;
+                }}
+                onPointerCancel={() => {
+                  inlineSliderCommittedRef.current = false;
+                }}
+                onBlur={() => {
+                  inlineSliderCommittedRef.current = false;
+                }}
                 className="studio-slider w-24"
               />
               <span className="font-mono-tabular w-10">
@@ -837,7 +881,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
           <button
             type="button"
             onClick={() => setEditingAudioTransitionClipId(null)}
-            className="px-2.5 py-1 rounded bg-[#182c24] hover:bg-[#203a2f] text-xs text-emerald-100 cursor-pointer"
+            className="px-2.5 py-1 rounded bg-emerald-600/15 hover:bg-emerald-600/25 dark:bg-[#182c24] dark:hover:bg-[#203a2f] text-xs text-emerald-800 dark:text-emerald-100 cursor-pointer"
           >
             Done
           </button>
@@ -850,21 +894,21 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
         style={{ maxHeight: `${stackHeight}px` }}
         onMouseDown={handleScrollAreaMouseDown}
         onWheel={handleWheelZoom}
-        className="flex overflow-auto bg-[#0e1116]"
+        className="flex overflow-auto bg-slate-100 dark:bg-[#0e1116]"
       >
         {/* Sticky Left Track Headers */}
-        <div className="w-44 shrink-0 sticky left-0 z-30 border-r border-[#232832] bg-[#12151b]">
-          <div className="h-7 border-b border-[#232832] px-2.5 flex items-center justify-between text-[10px] text-slate-400 font-mono-tabular sticky top-0 bg-[#12151b] z-10">
+        <div className="w-44 shrink-0 sticky left-0 z-30 border-r border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#12151b]">
+          <div className="h-7 border-b border-slate-200 dark:border-[#232832] px-2.5 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 font-mono-tabular sticky top-0 bg-slate-50 dark:bg-[#12151b] z-10">
             <span>BOUNDLESS ({tracks.length})</span>
-            <span className="text-slate-500">Z-ORDER</span>
+            <span className="text-slate-400 dark:text-slate-500">Z-ORDER</span>
           </div>
 
           {/* Top Quick-Stack Header Row */}
-          <div className="h-7 border-b border-[#1d222c] px-2 flex items-center justify-between bg-[#101319]">
+          <div className="h-7 border-b border-slate-200 dark:border-[#1d222c] px-2 flex items-center justify-between bg-slate-100 dark:bg-[#101319]">
             <button
               type="button"
               onClick={() => onAddTrack('video', 'overlay')}
-              className="text-[10px] text-purple-300 hover:text-purple-200 flex items-center gap-1 cursor-pointer"
+              className="text-[10px] text-purple-600 hover:text-purple-800 dark:text-purple-300 dark:hover:text-purple-200 flex items-center gap-1 cursor-pointer"
             >
               <Plus className="w-2.5 h-2.5" />
               <span>Stack Overlay Above</span>
@@ -883,16 +927,16 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
             const roleCode = role === 'overlay' ? 'OL' : role === 'video' ? 'V' : 'A';
             const roleColor =
               role === 'overlay'
-                ? 'text-purple-300'
+                ? 'text-purple-600 dark:text-purple-300'
                 : role === 'video'
-                  ? 'text-blue-300'
-                  : 'text-emerald-300';
+                  ? 'text-blue-600 dark:text-blue-300'
+                  : 'text-emerald-600 dark:text-emerald-300';
 
             return (
               <div
                 key={trk.id}
-                className={`${rowHeightClass} border-b border-[#232832] px-2 py-1 flex flex-col justify-between ${
-                  trk.locked ? 'bg-[#101318]' : ''
+                className={`${rowHeightClass} border-b border-slate-200 dark:border-[#232832] px-2 py-1 flex flex-col justify-between ${
+                  trk.locked ? 'bg-slate-200/70 dark:bg-[#101318]' : ''
                 }`}
               >
                 <div className="flex items-center justify-between gap-1">
@@ -910,7 +954,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                           if (e.key === 'Enter') commitTrackRename(trk.id);
                           if (e.key === 'Escape') setRenamingTrackId(null);
                         }}
-                        className="w-full h-4 px-1 rounded bg-[#0a0c10] border border-blue-500 text-[10px] text-white"
+                        className="w-full h-4 px-1 rounded bg-white dark:bg-[#0a0c10] border border-blue-500 text-[10px] text-slate-900 dark:text-white"
                       />
                     ) : (
                       <span
@@ -920,7 +964,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                         }}
                         title="Double-click to rename layer"
                         className={`text-[11px] font-semibold truncate cursor-text ${
-                          trk.isFolder ? 'text-amber-300' : 'text-slate-200'
+                          trk.isFolder ? 'text-amber-600 dark:text-amber-300' : 'text-slate-800 dark:text-slate-200'
                         }`}
                       >
                         {trk.parentFolderId ? `↳ ${trk.name}` : trk.name}
@@ -936,7 +980,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                           disabled={!canMoveUp}
                           onClick={() => onMoveTrack(trk.id, 'up')}
                           title="Move layer higher in stack"
-                          className="p-0.5 text-slate-500 hover:text-slate-200 disabled:opacity-20 cursor-pointer"
+                          className="p-0.5 text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 disabled:opacity-20 cursor-pointer"
                         >
                           <ArrowUp className="w-2.5 h-2.5" />
                         </button>
@@ -945,7 +989,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                           disabled={!canMoveDown}
                           onClick={() => onMoveTrack(trk.id, 'down')}
                           title="Move layer lower in stack"
-                          className="p-0.5 text-slate-500 hover:text-slate-200 disabled:opacity-20 cursor-pointer"
+                          className="p-0.5 text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 disabled:opacity-20 cursor-pointer"
                         >
                           <ArrowDown className="w-2.5 h-2.5" />
                         </button>
@@ -956,7 +1000,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                         type="button"
                         onClick={() => onDeleteTrack(trk.id)}
                         title="Remove layer"
-                        className="p-0.5 text-slate-600 hover:text-red-400 cursor-pointer"
+                        className="p-0.5 text-slate-500 dark:text-slate-600 hover:text-red-500 dark:hover:text-red-400 cursor-pointer"
                       >
                         <Trash2 className="w-2.5 h-2.5" />
                       </button>
@@ -970,12 +1014,15 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                       {trk.kind === 'video' ? (
                         <button
                           type="button"
-                          onClick={() => onUpdateTrack(trk.id, { hidden: !trk.hidden })}
+                          onClick={() => {
+                            onCommitHistory();
+                            onUpdateTrack(trk.id, { hidden: !trk.hidden });
+                          }}
                           title={trk.hidden ? 'Show layer' : 'Hide layer'}
                           className={`p-0.5 rounded text-[10px] cursor-pointer ${
                             trk.hidden
-                              ? 'bg-amber-500/20 text-amber-300'
-                              : 'bg-[#1a1f28] text-slate-400 hover:text-white'
+                              ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300'
+                              : 'bg-slate-200/80 dark:bg-[#1a1f28] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                           }`}
                         >
                           {trk.hidden ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
@@ -983,12 +1030,15 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                       ) : (
                         <button
                           type="button"
-                          onClick={() => onUpdateTrack(trk.id, { solo: !trk.solo })}
+                          onClick={() => {
+                            onCommitHistory();
+                            onUpdateTrack(trk.id, { solo: !trk.solo });
+                          }}
                           title="Solo track"
                           className={`px-1 py-0.5 rounded text-[9px] font-bold leading-none cursor-pointer ${
                             trk.solo
                               ? 'bg-amber-500 text-black'
-                              : 'bg-[#1a1f28] text-slate-400 hover:text-white'
+                              : 'bg-slate-200/80 dark:bg-[#1a1f28] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                           }`}
                         >
                           S
@@ -996,24 +1046,30 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                       )}
                       <button
                         type="button"
-                        onClick={() => onUpdateTrack(trk.id, { muted: !trk.muted })}
+                        onClick={() => {
+                          onCommitHistory();
+                          onUpdateTrack(trk.id, { muted: !trk.muted });
+                        }}
                         title={trk.muted ? 'Unmute track' : 'Mute track'}
                         className={`p-0.5 rounded cursor-pointer ${
                           trk.muted
-                            ? 'bg-red-500/20 text-red-400'
-                            : 'bg-[#1a1f28] text-slate-400 hover:text-white'
+                            ? 'bg-red-500/20 text-red-600 dark:text-red-400'
+                            : 'bg-slate-200/80 dark:bg-[#1a1f28] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                         }`}
                       >
                         {trk.muted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
                       </button>
                       <button
                         type="button"
-                        onClick={() => onUpdateTrack(trk.id, { locked: !trk.locked })}
+                        onClick={() => {
+                          onCommitHistory();
+                          onUpdateTrack(trk.id, { locked: !trk.locked });
+                        }}
                         title={trk.locked ? 'Unlock track' : 'Lock track during rough cuts'}
                         className={`p-0.5 rounded cursor-pointer ${
                           trk.locked
-                            ? 'bg-amber-500/20 text-amber-300'
-                            : 'bg-[#1a1f28] text-slate-500 hover:text-white'
+                            ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300'
+                            : 'bg-slate-200/80 dark:bg-[#1a1f28] text-slate-500 hover:text-slate-900 dark:hover:text-white'
                         }`}
                       >
                         {trk.locked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
@@ -1027,12 +1083,25 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                             step={0.05}
                             value={trk.volume ?? 1}
                             title={`Track volume: ${Math.round((trk.volume ?? 1) * 100)}%`}
-                            onChange={(e) =>
-                              onUpdateTrack(trk.id, { volume: Number(e.target.value) })
-                            }
+                            onChange={(e) => {
+                              if (!inlineSliderCommittedRef.current) {
+                                onCommitHistory();
+                                inlineSliderCommittedRef.current = true;
+                              }
+                              onUpdateTrack(trk.id, { volume: Number(e.target.value) });
+                            }}
+                            onPointerUp={() => {
+                              inlineSliderCommittedRef.current = false;
+                            }}
+                            onPointerCancel={() => {
+                              inlineSliderCommittedRef.current = false;
+                            }}
+                            onBlur={() => {
+                              inlineSliderCommittedRef.current = false;
+                            }}
                             className="studio-slider w-12"
                           />
-                          <span className="text-[9px] text-emerald-300/80 font-mono-tabular">
+                          <span className="text-[9px] text-emerald-700 dark:text-emerald-300/80 font-mono-tabular">
                             {Math.round((trk.volume ?? 1) * 100)}%
                           </span>
                         </div>
@@ -1048,11 +1117,11 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
           })}
 
           {/* Bottom Quick-Stack Header Row */}
-          <div className="h-7 px-2 flex items-center justify-between bg-[#101319]">
+          <div className="h-7 px-2 flex items-center justify-between bg-slate-100 dark:bg-[#101319]">
             <button
               type="button"
               onClick={() => onAddTrack('audio', 'audio')}
-              className="text-[10px] text-emerald-300 hover:text-emerald-200 flex items-center gap-1 cursor-pointer"
+              className="text-[10px] text-emerald-700 hover:text-emerald-900 dark:text-emerald-300 dark:hover:text-emerald-200 flex items-center gap-1 cursor-pointer"
             >
               <Plus className="w-2.5 h-2.5" />
               <span>Stack Audio Below</span>
@@ -1065,13 +1134,13 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
           {/* Sticky Time Ruler + Beat Ticks */}
           <div
             onMouseDown={handleRulerMouseDown}
-            className="h-7 border-b border-[#232832] bg-[#13171f] sticky top-0 z-20 cursor-pointer"
+            className="h-7 border-b border-slate-200 dark:border-[#232832] bg-white dark:bg-[#13171f] sticky top-0 z-20 cursor-pointer"
           >
             {ticks.map((t) => (
               <div
                 key={t}
                 style={{ left: `${t * pxPerSec}px` }}
-                className="absolute top-0 bottom-0 border-l border-[#2a303d] pl-1 flex items-center text-[10px] text-slate-400 font-mono-tabular"
+                className="absolute top-0 bottom-0 border-l border-slate-200 dark:border-[#2a303d] pl-1 flex items-center text-[10px] text-slate-500 dark:text-slate-400 font-mono-tabular"
               >
                 {formatFrameTimecode(t, fps).slice(3)}
               </div>
@@ -1080,7 +1149,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
               <div
                 key={`${b}-${idx}`}
                 style={{ left: `${b * pxPerSec}px` }}
-                className="absolute bottom-0 w-[2px] h-2 bg-amber-400/75 pointer-events-none"
+                className="absolute bottom-0 w-[2px] h-2 bg-amber-500/80 dark:bg-amber-400/75 pointer-events-none"
               />
             ))}
             {markIn !== null && markOut !== null && markOut > markIn && (
@@ -1089,7 +1158,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                   left: `${markIn * pxPerSec}px`,
                   width: `${Math.max(2, (markOut - markIn) * pxPerSec)}px`,
                 }}
-                className="absolute top-0 bottom-0 bg-blue-500/20 border-x border-blue-400/70 pointer-events-none"
+                className="absolute top-0 bottom-0 bg-blue-500/20 border-x border-blue-500/70 dark:border-blue-400/70 pointer-events-none"
               />
             )}
           </div>
@@ -1105,7 +1174,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
               const dropT = Math.max(0, Number(((e.clientX - rect.left) / pxPerSec).toFixed(2)));
               onDropAssetCreateTrack(asset, 'overlay', snapTime(dropT));
             }}
-            className="h-7 border-b border-dashed border-[#242a36] bg-[#101319] flex items-center pl-4 text-[10px] text-slate-500"
+            className="h-7 border-b border-dashed border-slate-300 dark:border-[#242a36] bg-slate-50 dark:bg-[#101319] flex items-center pl-4 text-[10px] text-slate-500"
           >
             Drop photos or videos here to stack a new Overlay Layer above
           </div>
@@ -1136,13 +1205,13 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                   const dropT = Math.max(0, Number(((e.clientX - rect.left) / pxPerSec).toFixed(2)));
                   onDropAssetOnTrack(asset, trk.id, snapTime(dropT));
                 }}
-                className={`${rowHeightClass} border-b border-[#232832] relative ${
+                className={`${rowHeightClass} border-b border-slate-200 dark:border-[#232832] relative ${
                   trk.hidden ? 'opacity-40' : ''
-                } ${trk.locked ? 'bg-[#111319]/80' : ''}`}
+                } ${trk.locked ? 'bg-slate-200/50 dark:bg-[#111319]/80' : ''}`}
               >
                 {trkClips.length === 0 && (
                   <div className="absolute inset-0 flex items-center pl-4 pointer-events-none">
-                    <span className="text-[11px] text-slate-600">
+                    <span className="text-[11px] text-slate-400 dark:text-slate-600">
                       {role === 'overlay'
                         ? 'Overlay layer — drop graphics, PiP clips, or titles here'
                         : trk.kind === 'video'
@@ -1188,70 +1257,24 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                         } ${
                           clip.kind === 'audio'
                             ? isSel
-                              ? 'border-emerald-400 bg-[#132b24]'
-                              : 'border-[#1f4438] bg-[#10221c] hover:border-emerald-500/60'
+                              ? 'border-emerald-400 bg-emerald-950 dark:bg-[#132b24]'
+                              : 'border-emerald-700/70 dark:border-[#1f4438] bg-emerald-950/90 dark:bg-[#10221c] hover:border-emerald-400'
                             : clip.kind === 'title'
                               ? isSel
-                                ? 'border-amber-400 bg-[#2c2214]'
-                                : 'border-[#4a371b] bg-[#211a11] hover:border-amber-500/70'
+                                ? 'border-amber-500 dark:border-amber-400 bg-amber-100 dark:bg-[#2c2214]'
+                                : 'border-amber-300 dark:border-[#4a371b] bg-amber-50 dark:bg-[#211a11] hover:border-amber-500/70'
                               : isSel
-                                ? 'border-blue-400 bg-[#1a263a]'
-                                : 'border-[#2c3545] bg-[#171d27] hover:border-slate-500'
+                                ? 'border-blue-500 dark:border-blue-400 bg-blue-100 dark:bg-[#1a263a]'
+                                : 'border-slate-300 dark:border-[#2c3545] bg-white dark:bg-[#171d27] hover:border-slate-400 dark:hover:border-slate-500'
                         }`}
                       >
-                        {clip.kind === 'audio' && clip.waveform && clip.waveform.length > 0 && (
-                          <svg
-                            viewBox={`0 0 ${Math.min(140, clip.waveform.length)} 32`}
-                            preserveAspectRatio="none"
-                            className="absolute inset-0 w-full h-full pointer-events-none opacity-45"
-                          >
-                            {(() => {
-                              const bars = clip.waveform!;
-                              const count = Math.min(140, bars.length);
-                              const step = Math.max(1, Math.floor(bars.length / count));
-                              const fadeCurve = clip.audioFadeCurve || 'scurve';
-                              const rects: React.ReactNode[] = [];
-                              for (let i = 0; i < count; i++) {
-                                const norm = count > 1 ? i / (count - 1) : 0;
-                                const localSec = norm * clip.duration;
-                                const envGain = evaluateAudioEnvelopeGain(
-                                  clip.volumeEnvelope,
-                                  norm,
-                                  clip.volume ?? 1,
-                                );
-                                let fMult = 1;
-                                if ((clip.fadeIn || 0) > 0.02 && localSec < clip.fadeIn) {
-                                  fMult *= applyAudioFadeCurve(localSec / clip.fadeIn, fadeCurve);
-                                }
-                                if ((clip.fadeOut || 0) > 0.02 && localSec > clip.duration - clip.fadeOut) {
-                                  fMult *= applyAudioFadeCurve(
-                                    (clip.duration - localSec) / clip.fadeOut,
-                                    fadeCurve,
-                                  );
-                                }
-                                const rawBar = Math.max(0.08, Math.min(1, bars[i * step] ?? 0.15));
-                                const scaled = Math.max(0.04, Math.min(1, rawBar * Math.min(1.5, envGain) * fMult));
-                                const h = scaled * 30;
-                                rects.push(
-                                  <rect
-                                    key={i}
-                                    x={i + 0.15}
-                                    y={(32 - h) / 2}
-                                    width={0.68}
-                                    height={h}
-                                    fill={
-                                      clip.muted
-                                        ? '#64748b'
-                                        : clip.backgroundDucking
-                                          ? '#6ee7b7'
-                                          : '#34d399'
-                                    }
-                                  />,
-                                );
-                              }
-                              return rects;
-                            })()}
-                          </svg>
+                        {clip.kind === 'audio' && (
+                          <AudioClipWaveform
+                            clip={clip}
+                            asset={asset}
+                            widthPx={widthPx}
+                            pxPerSec={pxPerSec}
+                          />
                         )}
 
                         {/* Interactive Music Layer Rubber-Band Volume, Envelope Nodes & Fade Ramps */}
@@ -1263,15 +1286,40 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                               className="absolute inset-0 w-full h-full pointer-events-none z-[5]"
                             >
                               {audioFadeInPx > 1 && widthPx > 0 && (
-                                <polygon
-                                  points={`0,0 ${(audioFadeInPx / widthPx) * 100},0 0,100`}
-                                  fill="rgba(0,0,0,0.48)"
+                                <path
+                                  d={(() => {
+                                    const fadeW = (audioFadeInPx / widthPx) * 100;
+                                    const curve = clip.audioFadeCurve || 'scurve';
+                                    let d = `M 0 0 L ${fadeW.toFixed(2)} 0`;
+                                    const steps = 10;
+                                    for (let s = steps; s >= 0; s--) {
+                                      const u = s / steps;
+                                      const x = u * fadeW;
+                                      const y = (1 - applyAudioFadeCurve(u, curve)) * 100;
+                                      d += ` L ${x.toFixed(2)} ${y.toFixed(2)}`;
+                                    }
+                                    return `${d} Z`;
+                                  })()}
+                                  fill="rgba(0,0,0,0.46)"
                                 />
                               )}
                               {audioFadeOutPx > 1 && widthPx > 0 && (
-                                <polygon
-                                  points={`${100 - (audioFadeOutPx / widthPx) * 100},0 100,0 100,100`}
-                                  fill="rgba(0,0,0,0.48)"
+                                <path
+                                  d={(() => {
+                                    const fadeW = (audioFadeOutPx / widthPx) * 100;
+                                    const startX = 100 - fadeW;
+                                    const curve = clip.audioFadeCurve || 'scurve';
+                                    let d = `M ${startX.toFixed(2)} 0 L 100 0 L 100 100`;
+                                    const steps = 10;
+                                    for (let s = steps; s >= 0; s--) {
+                                      const u = s / steps;
+                                      const x = startX + (1 - u) * fadeW;
+                                      const y = (1 - applyAudioFadeCurve(u, curve)) * 100;
+                                      d += ` L ${x.toFixed(2)} ${y.toFixed(2)}`;
+                                    }
+                                    return `${d} Z`;
+                                  })()}
+                                  fill="rgba(0,0,0,0.46)"
                                 />
                               )}
                               {hasEnv ? (
@@ -1407,12 +1455,24 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                           {clip.kind === 'title' && (
                             <Type className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                           )}
-                          <div className="min-w-0 flex-1">
-                            <p className="text-[11px] font-medium text-slate-100 truncate">
+                          <div className={`min-w-0 flex-1 ${clip.kind === 'audio' ? 'drop-shadow-[0_1px_2px_rgba(0,0,0,0.92)]' : ''}`}>
+                            <p
+                              className={`text-[11px] font-medium truncate ${
+                                clip.kind === 'audio'
+                                  ? 'text-slate-100'
+                                  : 'text-slate-900 dark:text-slate-100'
+                              }`}
+                            >
                               {clip.name}
                             </p>
                             {!compactRows && (
-                              <p className="text-[9px] text-slate-400 font-mono-tabular truncate">
+                              <p
+                                className={`text-[9px] font-mono-tabular truncate ${
+                                  clip.kind === 'audio'
+                                    ? 'text-emerald-200/90'
+                                    : 'text-slate-600 dark:text-slate-400'
+                                }`}
+                              >
                                 {clip.duration.toFixed(2)}s
                                 {clip.kind === 'audio' ? ` · ${Math.round((clip.volume ?? 1) * 100)}%` : ''}
                                 {clip.kind === 'audio' && clip.backgroundDucking ? ' · DUCK' : ''}
@@ -1436,7 +1496,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                                   onDuplicateClip(clip.id);
                                 }}
                                 title="Duplicate clip (Ctrl+D)"
-                                className="p-0.5 rounded bg-black/60 text-slate-300 hover:text-blue-400 cursor-pointer"
+                                className="p-0.5 rounded bg-black/60 text-slate-200 hover:text-blue-400 cursor-pointer"
                               >
                                 <Copy className="w-2.5 h-2.5" />
                               </button>
@@ -1449,7 +1509,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                                 onDeleteClip(clip.id);
                               }}
                               title="Delete clip"
-                              className="p-0.5 rounded bg-black/60 text-slate-300 hover:text-red-400 cursor-pointer"
+                              className="p-0.5 rounded bg-black/60 text-slate-200 hover:text-red-400 cursor-pointer"
                             >
                               <Trash2 className="w-2.5 h-2.5" />
                             </button>
@@ -1478,7 +1538,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                           className={`absolute bottom-0.5 -translate-x-1/2 z-20 px-1.5 py-0.5 rounded text-[9px] font-mono-tabular border whitespace-nowrap cursor-pointer ${
                             editingTransitionClipId === clip.id
                               ? 'bg-blue-600 border-blue-300 text-white'
-                              : 'bg-[#0e121a] border-[#333c4d] text-slate-300 hover:border-blue-400 hover:text-white'
+                              : 'bg-white dark:bg-[#0e121a] border-slate-300 dark:border-[#333c4d] text-slate-700 dark:text-slate-300 hover:border-blue-400 hover:text-blue-700 dark:hover:text-white shadow-xs dark:shadow-none'
                           }`}
                         >
                           ↔ {clip.transitionOut}
@@ -1500,7 +1560,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                           className={`absolute bottom-0.5 -translate-x-1/2 z-20 px-1.5 py-0.5 rounded text-[9px] font-mono-tabular border whitespace-nowrap cursor-pointer ${
                             editingAudioTransitionClipId === clip.id
                               ? 'bg-emerald-600 border-emerald-300 text-white'
-                              : 'bg-[#0c1a15] border-emerald-700/70 text-emerald-200 hover:border-emerald-400 hover:text-white'
+                              : 'bg-emerald-50 dark:bg-[#0c1a15] border-emerald-400 dark:border-emerald-700/70 text-emerald-800 dark:text-emerald-200 hover:border-emerald-500 hover:text-emerald-950 dark:hover:text-white shadow-xs dark:shadow-none'
                           }`}
                         >
                           ♪ {AUDIO_TRANSITION_LABELS[clip.audioTransitionOut || 'cut']}
@@ -1524,7 +1584,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
               const dropT = Math.max(0, Number(((e.clientX - rect.left) / pxPerSec).toFixed(2)));
               onDropAssetCreateTrack(asset, 'audio', snapTime(dropT));
             }}
-            className="h-7 bg-[#101319] flex items-center pl-4 text-[10px] text-slate-500"
+            className="h-7 bg-slate-50 dark:bg-[#101319] flex items-center pl-4 text-[10px] text-slate-500"
           >
             Drop audio here to stack a new Audio Track below
           </div>
@@ -1543,13 +1603,13 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
       <div
         onMouseDown={startResizeStackHeight}
         title="Drag vertically to resize Boundless Tracks height"
-        className="h-4 bg-[#11141a] hover:bg-blue-600/20 border-t border-[#232832] px-3 flex items-center justify-between cursor-ns-resize transition-colors"
+        className="h-4 bg-slate-50 dark:bg-[#11141a] hover:bg-blue-500/10 dark:hover:bg-blue-600/20 border-t border-slate-200 dark:border-[#232832] px-3 flex items-center justify-between cursor-ns-resize transition-colors"
       >
         <span className="text-[9px] text-slate-500 font-mono-tabular">
           {audioDragReadout || 'Audio Tip: Drag top fade dots, rubber-band line, or double-click clip to add volume ramp points'}
         </span>
-        <div className="w-10 h-0.5 rounded bg-slate-600" />
-        <span className="text-[9px] text-slate-600 font-mono-tabular">↕ {stackHeight}px</span>
+        <div className="w-10 h-0.5 rounded bg-slate-300 dark:bg-slate-600" />
+        <span className="text-[9px] text-slate-500 dark:text-slate-600 font-mono-tabular">↕ {stackHeight}px</span>
       </div>
     </section>
   );

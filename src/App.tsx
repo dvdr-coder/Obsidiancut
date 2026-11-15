@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, Check, Download, FolderOpen, Loader2, Save, Trash2 } from 'lucide-react';
+import { BookOpen, Check, Download, FolderOpen, Loader2, Moon, Save, Sun, Trash2 } from 'lucide-react';
 import obsidianLogo from './assets/images/obsidian_cut_logo_1794556840933.jpg';
 import { AutoModeBar } from './components/AutoModeBar';
 import { ClipInspectorPanel } from './components/ClipInspectorPanel';
@@ -9,6 +9,7 @@ import { FusionVfxStudio } from './components/FusionVfxStudio';
 import { MediaBin } from './components/MediaBin';
 import { MultiMasterEditStudio } from './components/MultiMasterEditStudio';
 import { PreviewCanvas } from './components/PreviewCanvas';
+import { QuickRenderPage } from './components/QuickRenderPage';
 import { TimelineEditor } from './components/TimelineEditor';
 import { TransitionLibraryPanel } from './components/TransitionLibraryPanel';
 import { TutorialModal } from './components/TutorialModal';
@@ -30,6 +31,7 @@ import {
 import {
   autoAssembleTimeline,
   AutoAssembleOptions,
+  autoBuildQuickRenderTimeline,
   cloneClipKeyframes,
   cloneVolumeEnvelope,
   computeTimelineDuration,
@@ -40,6 +42,7 @@ import {
   normalizeTimelineTransitions,
   nudgeClipRoll,
   nudgeClipSlip,
+  QuickAutoSelectOptions,
   resolveFfmpegXfadeFilter,
   rippleDeleteClipFromList,
   splitClipAtTime,
@@ -47,7 +50,7 @@ import {
 } from './utils/timelineMath';
 import { renderTitleToExportPng } from './utils/titleRenderer';
 
-type EditorMode = 'auto' | 'manual' | 'advanced';
+type EditorMode = 'auto' | 'manual' | 'advanced' | 'quickrender';
 type AdvancedSubTab = 'fusion' | 'fairlight' | 'multimaster' | 'transitions';
 
 interface EditorSnapshot {
@@ -87,14 +90,32 @@ export default function App() {
     format: 'mp4',
     speedProfile: 'veryfast',
     autoDownload: true,
+    normalizeAudio: false,
+    normalizeTargetLufs: -14,
   });
   const [exportModalOpen, setExportModalOpen] = useState<boolean>(false);
   const [tutorialOpen, setTutorialOpen] = useState<boolean>(false);
   const [rippleMode, setRippleMode] = useState<boolean>(false);
   const [freeformRoughCut, setFreeformRoughCut] = useState<boolean>(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    try {
+      return localStorage.getItem('obsidiancut_theme') === 'light' ? 'light' : 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
   const [logoFailed, setLogoFailed] = useState<boolean>(false);
   const [renderJob, setRenderJob] = useState<RenderJobStatus | null>(null);
   const autoDownloadedJobRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    try {
+      localStorage.setItem('obsidiancut_theme', theme);
+    } catch {
+      // ignore
+    }
+  }, [theme]);
 
   const [uploading, setUploading] = useState<boolean>(false);
   const [loadingSample, setLoadingSample] = useState<boolean>(false);
@@ -286,6 +307,12 @@ export default function App() {
       crop: target.crop ? { ...target.crop } : undefined,
       colorGrade: target.colorGrade ? { ...target.colorGrade } : undefined,
       title: target.title ? { ...target.title } : undefined,
+      fusion: target.fusion
+        ? {
+            ...target.fusion,
+            rotoscopePoints: target.fusion.rotoscopePoints.map((p) => ({ ...p })),
+          }
+        : undefined,
       keyframes: cloneClipKeyframes(target.keyframes),
       volumeEnvelope: cloneVolumeEnvelope(target.volumeEnvelope),
     };
@@ -441,13 +468,17 @@ export default function App() {
 
   const handleDeleteAsset = async (id: string) => {
     try {
-      await fetch(`/api/media/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await fetch(`/api/media/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Failed to delete media asset (${res.status})`);
+      }
       commitHistory();
       setAssets((prev) => prev.filter((a) => a.id !== id));
       setClips((prev) => prev.filter((c) => c.mediaId !== id));
       notify('Media asset removed');
-    } catch {
-      // ignore
+    } catch (err) {
+      setErrorBanner((err as Error).message || 'Could not remove media asset');
     }
   };
 
@@ -700,9 +731,9 @@ export default function App() {
     notify(`Created Audio Folder Bus "${name}"`);
   };
 
-  const handleApplyTransition = (type: TransitionType, duration: number) => {
+  const handleApplyTransition = (type: TransitionType, duration: number, shouldCommit = true) => {
     if (!selectedClip) return;
-    commitHistory();
+    if (shouldCommit) commitHistory();
     const d = type === 'cut' ? 0 : Number(Math.max(0.1, duration).toFixed(2));
     handleUpdateClip(selectedClip.id, {
       transitionOut: type,
@@ -715,7 +746,9 @@ export default function App() {
         ffmpegFilter: resolveFfmpegXfadeFilter(type),
       },
     });
-    notify(`Applied ${type} transition to "${selectedClip.name}"`);
+    if (shouldCommit) {
+      notify(`Applied ${type} transition to "${selectedClip.name}"`);
+    }
   };
 
   const handleApplyTransitionToAll = (type: TransitionType, duration: number) => {
@@ -829,10 +862,24 @@ export default function App() {
       id: uid('seq'),
       name,
       createdAt: new Date().toISOString(),
-      tracks: tracks.map((t) => ({ ...t })),
+      tracks: tracks.map((t) => ({
+        ...t,
+        audioDsp: t.audioDsp
+          ? { ...t.audioDsp, vstSlots: (t.audioDsp.vstSlots || []).map((s) => ({ ...s })) }
+          : undefined,
+      })),
       clips: clips.map((c) => ({
         ...c,
         effects: { ...c.effects },
+        crop: c.crop ? { ...c.crop } : undefined,
+        colorGrade: c.colorGrade ? { ...c.colorGrade } : undefined,
+        title: c.title ? { ...c.title } : undefined,
+        fusion: c.fusion
+          ? {
+              ...c.fusion,
+              rotoscopePoints: c.fusion.rotoscopePoints.map((p) => ({ ...p })),
+            }
+          : undefined,
         keyframes: cloneClipKeyframes(c.keyframes),
         volumeEnvelope: cloneVolumeEnvelope(c.volumeEnvelope),
       })),
@@ -845,11 +892,27 @@ export default function App() {
     const found = nestedSequences.find((s) => s.id === seqId);
     if (!found) return;
     commitHistory();
-    setTracks(found.tracks.map((t) => ({ ...t })));
+    setTracks(
+      found.tracks.map((t) => ({
+        ...t,
+        audioDsp: t.audioDsp
+          ? { ...t.audioDsp, vstSlots: (t.audioDsp.vstSlots || []).map((s) => ({ ...s })) }
+          : undefined,
+      })),
+    );
     setClips(
       found.clips.map((c) => ({
         ...c,
         effects: { ...c.effects },
+        crop: c.crop ? { ...c.crop } : undefined,
+        colorGrade: c.colorGrade ? { ...c.colorGrade } : undefined,
+        title: c.title ? { ...c.title } : undefined,
+        fusion: c.fusion
+          ? {
+              ...c.fusion,
+              rotoscopePoints: c.fusion.rotoscopePoints.map((p) => ({ ...p })),
+            }
+          : undefined,
         keyframes: cloneClipKeyframes(c.keyframes),
         volumeEnvelope: cloneVolumeEnvelope(c.volumeEnvelope),
       })),
@@ -916,21 +979,33 @@ export default function App() {
     commitHistory();
     const kind: 'video' | 'audio' = role === 'audio' ? 'audio' : 'video';
     const newTrack = buildNewTrack(kind, tracks, undefined, role);
-    setTracks((prev) => (role === 'overlay' ? [newTrack, ...prev] : [...prev, newTrack]));
+    setTracks((prev) => {
+      if (role === 'overlay') {
+        return [newTrack, ...prev];
+      }
+      if (kind === 'video') {
+        const firstVideoOrAudioIdx = prev.findIndex((t) => t.kind === 'audio' || t.layerRole !== 'overlay');
+        if (firstVideoOrAudioIdx === -1) return [...prev, newTrack];
+        const next = [...prev];
+        next.splice(firstVideoOrAudioIdx, 0, newTrack);
+        return next;
+      }
+      return [...prev, newTrack];
+    });
     const clip = createClipFromAsset(asset, newTrack.id, startTime, role === 'overlay');
     setClips((prev) => [...prev, clip]);
     setSelectedClipId(clip.id);
     notify(`Stacked ${newTrack.name} with "${asset.name}"`);
   };
 
-  const handleStartRender = async () => {
-    if (clips.length === 0) return;
+  const enqueueRender = async (clipsToRender: TimelineClip[], cfgToRender: ExportConfig) => {
+    if (clipsToRender.length === 0) return;
     setErrorBanner(null);
     autoDownloadedJobRef.current = null;
 
     // Pre-render crisp alpha PNGs for any vector title / scrolling credits clips at export resolution
-    const [expW, expH] = exportConfig.resolution.split('x').map(Number);
-    const preparedClips = clips.map((c) => {
+    const [expW, expH] = cfgToRender.resolution.split('x').map(Number);
+    const preparedClips = clipsToRender.map((c) => {
       if (c.kind === 'title' && c.title) {
         const rendered = renderTitleToExportPng(c.title, expW, expH);
         return {
@@ -952,7 +1027,7 @@ export default function App() {
           tracks,
           clips: normalizedClips,
           colorGrade,
-          export: exportConfig,
+          export: cfgToRender,
         }),
       });
       const data = await res.json();
@@ -963,18 +1038,84 @@ export default function App() {
     }
   };
 
+  const handleStartRender = async () => {
+    await enqueueRender(clips, exportConfig);
+  };
+
+  const handleAutoSelectQuickRender = async (
+    opts: QuickAutoSelectOptions,
+    renderNow = false,
+  ) => {
+    setErrorBanner(null);
+    let sourceAssets = assets;
+    if (sourceAssets.length === 0) {
+      setLoadingSample(true);
+      try {
+        const res = await fetch('/api/sample-pack', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to load sample media');
+        const loaded: MediaAsset[] = data.assets || [];
+        sourceAssets = loaded;
+        setAssets(loaded);
+      } catch (err) {
+        setErrorBanner((err as Error).message);
+        setLoadingSample(false);
+        return;
+      } finally {
+        setLoadingSample(false);
+      }
+    }
+
+    const videoTracks = tracks.filter((t) => t.kind === 'video');
+    const mainV = videoTracks[videoTracks.length - 1]?.id || 'trk_v1';
+    const mainA = tracks.find((t) => t.kind === 'audio' && !t.isFolder)?.id || 'trk_a1';
+    const built = autoBuildQuickRenderTimeline(sourceAssets, opts, mainV, mainA);
+
+    if (built.clips.length === 0) {
+      notify('Upload photos, videos, or music to auto-assemble');
+      return;
+    }
+
+    commitHistory();
+    setClips(built.clips);
+    setSelectedClipId(built.clips[0]?.id || null);
+    setPlayhead(0);
+    setMasterMuted(false);
+
+    const nextExportCfg: ExportConfig = {
+      ...exportConfig,
+      normalizeAudio: opts.autoNormalize,
+      normalizeTargetLufs: opts.targetLufs,
+    };
+    setExportConfig(nextExportCfg);
+
+    if (renderNow) {
+      setIsPlaying(false);
+      notify(
+        `Auto-built ${built.visualCount} clips${built.selectedAudioName ? ` + "${built.selectedAudioName}"` : ''} — starting render`,
+      );
+      await enqueueRender(built.clips, nextExportCfg);
+    } else {
+      setIsPlaying(true);
+      notify(
+        `Auto-selected ${built.visualCount} clips${built.selectedAudioName ? ` + music "${built.selectedAudioName}"` : ''} — playing now`,
+      );
+    }
+  };
+
   const isBackgroundRendering =
     !exportModalOpen &&
+    mode !== 'quickrender' &&
     renderJob &&
     (renderJob.status === 'queued' || renderJob.status === 'rendering');
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#0d0f12] text-slate-100">
+    <div className="min-h-screen flex flex-col bg-[#f1f5f9] dark:bg-[#0d0f12] text-slate-900 dark:text-slate-100">
       {/* Three-Zone Top Bar */}
-      <header className="h-[52px] px-5 border-b border-[#222732] bg-[#12151a] flex items-center justify-between gap-8 shrink-0">
+      <header className="h-[52px] px-5 border-b border-slate-200 dark:border-[#222732] bg-white dark:bg-[#12151a] flex items-center justify-between gap-6 shrink-0">
         <a
           href="/"
-          className="flex items-center gap-2.5 text-lg font-bold tracking-tight text-white font-display whitespace-nowrap shrink-0"
+          className="flex items-center gap-2.5 text-lg font-bold tracking-tight text-slate-900 dark:text-white font-display whitespace-nowrap shrink-0"
         >
           {!logoFailed ? (
             <img
@@ -982,7 +1123,7 @@ export default function App() {
               alt="Obsidian Cut"
               referrerPolicy="no-referrer"
               onError={() => setLogoFailed(true)}
-              className="w-7 h-7 rounded object-cover border border-[#2c3340] shrink-0"
+              className="w-7 h-7 rounded object-cover border border-slate-300 dark:border-[#2c3340] shrink-0"
             />
           ) : (
             <span className="w-7 h-7 rounded bg-gradient-to-br from-blue-500 to-slate-800 border border-blue-400/50 flex items-center justify-center text-xs font-bold text-white shrink-0">
@@ -998,8 +1139,8 @@ export default function App() {
             onClick={() => setMode('auto')}
             className={`transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
               mode === 'auto'
-                ? 'text-white underline underline-offset-8 decoration-blue-500'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'text-slate-900 dark:text-white underline underline-offset-8 decoration-blue-500'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
             Auto Sync
@@ -1009,8 +1150,8 @@ export default function App() {
             onClick={() => setMode('manual')}
             className={`transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
               mode === 'manual'
-                ? 'text-white underline underline-offset-8 decoration-blue-500'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'text-slate-900 dark:text-white underline underline-offset-8 decoration-blue-500'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
             Endless Workspace
@@ -1020,30 +1161,60 @@ export default function App() {
             onClick={() => setMode('advanced')}
             className={`transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
               mode === 'advanced'
-                ? 'text-white underline underline-offset-8 decoration-blue-500'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'text-slate-900 dark:text-white underline underline-offset-8 decoration-blue-500'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
             Advanced Studio
           </button>
           <button
             type="button"
-            onClick={() => setTutorialOpen(true)}
-            className="text-slate-400 hover:text-slate-200 transition-colors whitespace-nowrap shrink-0 cursor-pointer flex items-center gap-1.5"
+            onClick={() => setMode('quickrender')}
+            className={`transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              mode === 'quickrender'
+                ? 'text-slate-900 dark:text-white underline underline-offset-8 decoration-emerald-500 dark:decoration-emerald-400'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
           >
-            <BookOpen className="w-3.5 h-3.5 text-blue-400" />
+            Quick Render
+          </button>
+          <button
+            type="button"
+            onClick={() => setTutorialOpen(true)}
+            className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-colors whitespace-nowrap shrink-0 cursor-pointer flex items-center gap-1.5"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
             <span>Tutorial</span>
           </button>
           <button
             type="button"
             onClick={() => setExportModalOpen(true)}
-            className="text-slate-400 hover:text-slate-200 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             Export Settings
           </button>
         </nav>
 
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+            aria-label={theme === 'dark' ? 'Switch to Light mode' : 'Switch to Dark mode'}
+            title={theme === 'dark' ? 'Switch to Light mode' : 'Switch to Dark mode'}
+            className="px-2.5 py-1.5 rounded bg-slate-100 dark:bg-[#1a1e26] hover:bg-slate-200 dark:hover:bg-[#232934] border border-slate-300 dark:border-[#2c3340] text-slate-700 dark:text-slate-200 text-xs font-medium flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            {theme === 'dark' ? (
+              <>
+                <Sun className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">Light</span>
+              </>
+            ) : (
+              <>
+                <Moon className="w-3.5 h-3.5 text-blue-600" />
+                <span className="hidden sm:inline">Dark</span>
+              </>
+            )}
+          </button>
           <button
             type="button"
             onClick={() => setExportModalOpen(true)}
@@ -1057,12 +1228,12 @@ export default function App() {
       </header>
 
       {errorBanner && (
-        <div className="px-5 py-2 bg-red-950/60 border-b border-red-800/70 text-xs text-red-200 flex items-center justify-between">
+        <div className="px-5 py-2 bg-red-50 dark:bg-red-950/60 border-b border-red-200 dark:border-red-800/70 text-xs text-red-800 dark:text-red-200 flex items-center justify-between">
           <span>{errorBanner}</span>
           <button
             type="button"
             onClick={() => setErrorBanner(null)}
-            className="text-red-300 hover:text-white underline"
+            className="text-red-700 dark:text-red-300 hover:text-red-950 dark:hover:text-white underline"
           >
             Dismiss
           </button>
@@ -1070,9 +1241,9 @@ export default function App() {
       )}
 
       {isBackgroundRendering && (
-        <div className="px-5 py-2 bg-[#111926] border-b border-blue-800/50 text-xs flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2 text-blue-200">
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
+        <div className="px-5 py-2 bg-blue-50 dark:bg-[#111926] border-b border-blue-200 dark:border-blue-800/50 text-xs flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2 text-blue-900 dark:text-blue-200">
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600 dark:text-blue-400" />
             <span>
               Background HD render running ({renderJob.progress}%
               {renderJob.speed ? ` · ${renderJob.speed}` : ''}) — file will auto-download when done.
@@ -1081,7 +1252,7 @@ export default function App() {
           <button
             type="button"
             onClick={() => setExportModalOpen(true)}
-            className="text-blue-300 hover:text-white font-medium whitespace-nowrap"
+            className="text-blue-700 dark:text-blue-300 hover:text-blue-950 dark:hover:text-white font-medium whitespace-nowrap"
           >
             View Progress
           </button>
@@ -1093,12 +1264,14 @@ export default function App() {
         <div className="flex flex-col gap-2.5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex items-center gap-1 p-1 bg-[#14171d] border border-[#232832] rounded-md">
+              <div className="inline-flex items-center gap-1 p-1 bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-md">
                 <button
                   type="button"
                   onClick={() => setMode('auto')}
                   className={`px-3 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    mode === 'auto' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-100'
+                    mode === 'auto'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
                   }`}
                 >
                   Auto Mode (Beat Sync)
@@ -1107,7 +1280,9 @@ export default function App() {
                   type="button"
                   onClick={() => setMode('manual')}
                   className={`px-3 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    mode === 'manual' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-100'
+                    mode === 'manual'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
                   }`}
                 >
                   Endless Workspace (Boundless Tracks)
@@ -1116,24 +1291,37 @@ export default function App() {
                   type="button"
                   onClick={() => setMode('advanced')}
                   className={`px-3 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                    mode === 'advanced' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-100'
+                    mode === 'advanced'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
                   }`}
                 >
                   Advanced Mode (Fusion · Fairlight · MultiMaster)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMode('quickrender')}
+                  className={`px-3 py-1 rounded text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    mode === 'quickrender'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                  }`}
+                >
+                  Quick Render
                 </button>
               </div>
               <button
                 type="button"
                 onClick={() => setTutorialOpen(true)}
-                className="md:hidden px-2.5 py-1.5 rounded bg-[#14171d] border border-[#232832] text-xs font-medium text-slate-300 hover:text-white flex items-center gap-1.5 whitespace-nowrap shrink-0"
+                className="md:hidden px-2.5 py-1.5 rounded bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white flex items-center gap-1.5 whitespace-nowrap shrink-0"
               >
-                <BookOpen className="w-3.5 h-3.5 text-blue-400" />
+                <BookOpen className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                 <span>Tutorial</span>
               </button>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-slate-400 font-mono-tabular mr-1">
+              <span className="text-xs text-slate-500 dark:text-slate-400 font-mono-tabular mr-1">
                 {tracks.length} tracks · {clips.length} clips · {totalDuration.toFixed(1)}s
               </span>
               <input
@@ -1151,18 +1339,18 @@ export default function App() {
                 onClick={handleSaveProject}
                 disabled={clips.length === 0}
                 title="Download timeline project as JSON"
-                className="px-2.5 py-1 rounded bg-[#14171d] hover:bg-[#1e2430] border border-[#232832] disabled:opacity-40 text-xs text-slate-300 hover:text-white flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
+                className="px-2.5 py-1 rounded bg-white dark:bg-[#14171d] hover:bg-slate-100 dark:hover:bg-[#1e2430] border border-slate-200 dark:border-[#232832] disabled:opacity-40 text-xs text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
               >
-                <Save className="w-3 h-3 text-blue-400" />
+                <Save className="w-3 h-3 text-blue-600 dark:text-blue-400" />
                 <span>Save</span>
               </button>
               <button
                 type="button"
                 onClick={() => projectInputRef.current?.click()}
                 title="Load saved project JSON"
-                className="px-2.5 py-1 rounded bg-[#14171d] hover:bg-[#1e2430] border border-[#232832] text-xs text-slate-300 hover:text-white flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
+                className="px-2.5 py-1 rounded bg-white dark:bg-[#14171d] hover:bg-slate-100 dark:hover:bg-[#1e2430] border border-slate-200 dark:border-[#232832] text-xs text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 transition-colors whitespace-nowrap shrink-0"
               >
-                <FolderOpen className="w-3 h-3 text-slate-400" />
+                <FolderOpen className="w-3 h-3 text-slate-500 dark:text-slate-400" />
                 <span>Load</span>
               </button>
               {clips.length > 0 && (
@@ -1172,8 +1360,8 @@ export default function App() {
                   title="Clear all clips from the timeline (Ctrl+Z to undo)"
                   className={`px-2.5 py-1 rounded border text-xs flex items-center gap-1 transition-colors whitespace-nowrap shrink-0 ${
                     confirmClear
-                      ? 'bg-red-600/20 border-red-500 text-red-200 font-medium'
-                      : 'bg-[#14171d] hover:bg-[#1e2430] border-[#232832] text-slate-400 hover:text-red-300'
+                      ? 'bg-red-600/15 dark:bg-red-600/20 border-red-500 text-red-700 dark:text-red-200 font-medium'
+                      : 'bg-white dark:bg-[#14171d] hover:bg-red-50 dark:hover:bg-[#1e2430] border-slate-200 dark:border-[#232832] text-slate-600 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-300'
                   }`}
                 >
                   <Trash2 className="w-3 h-3" />
@@ -1193,7 +1381,7 @@ export default function App() {
           )}
 
           {mode === 'advanced' && (
-            <div className="px-3 py-2 bg-[#14171d] border border-[#232832] rounded-lg flex flex-wrap items-center justify-between gap-2">
+            <div className="px-3 py-2 bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-1.5">
                 {(
                   [
@@ -1210,14 +1398,14 @@ export default function App() {
                     className={`px-3 py-1.5 rounded text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${
                       advancedTab === sub.id
                         ? 'bg-blue-600 text-white'
-                        : 'bg-[#0e1116] border border-[#262c38] text-slate-300 hover:text-white'
+                        : 'bg-slate-100 dark:bg-[#0e1116] border border-slate-200 dark:border-[#262c38] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                     }`}
                   >
                     {sub.label}
                   </button>
                 ))}
               </div>
-              <span className="text-[11px] text-slate-400 font-mono-tabular">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono-tabular">
                 J/K/L Shuttle · I/O Mark In/Out
               </span>
             </div>
@@ -1249,11 +1437,34 @@ export default function App() {
             <FairlightAudioStudio
               tracks={tracks}
               clips={clips}
+              selectedClipId={selectedClipId}
               playhead={playhead}
               isPlaying={isPlaying}
               masterMuted={masterMuted}
+              normalizeAudio={Boolean(exportConfig.normalizeAudio)}
+              normalizeTargetLufs={exportConfig.normalizeTargetLufs ?? -14}
               onTogglePlay={() => setIsPlaying((p) => !p)}
+              onSeekPlayhead={(t) => setPlayhead(t)}
               onToggleMasterMute={() => setMasterMuted((m) => !m)}
+              onToggleMasterNormalize={(enabled) =>
+                setExportConfig((prev) => ({
+                  ...prev,
+                  normalizeAudio: enabled,
+                  normalizeTargetLufs: prev.normalizeTargetLufs ?? -14,
+                }))
+              }
+              onChangeMasterNormalizeTarget={(lufs) =>
+                setExportConfig((prev) => ({
+                  ...prev,
+                  normalizeTargetLufs: lufs,
+                }))
+              }
+              onSelectClip={(id) => {
+                setSelectedClipId(id);
+                setGradeTargetAssetId(null);
+              }}
+              onUpdateClip={handleUpdateClip}
+              onCommitHistory={commitHistory}
               onUpdateTrack={handleUpdateTrack}
               onCreateAudioFolder={handleCreateAudioFolder}
               onAddAudioTrack={(folderId) => handleAddTrack('audio', folderId)}
@@ -1286,7 +1497,7 @@ export default function App() {
             />
           ) : (
             <div className="flex flex-col lg:flex-row gap-3 min-h-[380px] lg:h-[445px]">
-              <div className="w-full lg:w-[340px] shrink-0 bg-[#14171d] border border-[#232832] rounded-lg overflow-hidden flex flex-col">
+              <div className="w-full lg:w-[340px] shrink-0 bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg overflow-hidden flex flex-col">
                 <TransitionLibraryPanel
                   selectedTransition={
                     selectedClip && (selectedClip.kind === 'image' || selectedClip.kind === 'video')
@@ -1317,6 +1528,8 @@ export default function App() {
                   playhead={playhead}
                   isPlaying={isPlaying}
                   masterMuted={masterMuted}
+                  normalizeAudio={Boolean(exportConfig.normalizeAudio)}
+                  normalizeTargetLufs={exportConfig.normalizeTargetLufs ?? -14}
                   loadingSample={loadingSample}
                   uploading={uploading}
                   onPlayheadChange={setPlayhead}
@@ -1341,6 +1554,49 @@ export default function App() {
               </div>
             </div>
           )
+        ) : mode === 'quickrender' ? (
+          <QuickRenderPage
+            assets={assets}
+            assetsMap={assetsMap}
+            tracks={tracks}
+            clips={clips}
+            selectedClipId={selectedClipId}
+            colorGrade={colorGrade}
+            bypassGrade={bypassGrade}
+            totalDuration={totalDuration}
+            playhead={playhead}
+            isPlaying={isPlaying}
+            masterMuted={masterMuted}
+            exportConfig={exportConfig}
+            renderJob={renderJob}
+            loadingSample={loadingSample}
+            uploading={uploading}
+            onChangeConfig={setExportConfig}
+            onStartRender={handleStartRender}
+            onTogglePlay={() => {
+              if (!isPlaying && playhead >= totalDuration && totalDuration > 0) {
+                setPlayhead(0);
+              }
+              setIsPlaying((p) => !p);
+            }}
+            onSeekPlayhead={(t) => {
+              setIsPlaying(false);
+              setPlayhead(t);
+            }}
+            onPlayheadChange={setPlayhead}
+            onToggleMasterMute={() => setMasterMuted((m) => !m)}
+            onSelectClip={(id) => {
+              setSelectedClipId(id);
+              if (id) setGradeTargetAssetId(null);
+            }}
+            onUpdateClip={handleUpdateClip}
+            onCommitHistory={commitHistory}
+            onLoadSamplePack={handleLoadSamplePack}
+            onUploadFiles={handleUploadFiles}
+            onOpenTimelineMode={() => setMode('manual')}
+            onOpenTutorial={() => setTutorialOpen(true)}
+            onAutoSelectQuickRender={handleAutoSelectQuickRender}
+          />
         ) : (
         <div className="flex flex-col lg:flex-row gap-3 min-h-[360px] lg:h-[445px]">
           <MediaBin
@@ -1376,6 +1632,8 @@ export default function App() {
               playhead={playhead}
               isPlaying={isPlaying}
               masterMuted={masterMuted}
+              normalizeAudio={Boolean(exportConfig.normalizeAudio)}
+              normalizeTargetLufs={exportConfig.normalizeTargetLufs ?? -14}
               loadingSample={loadingSample}
               uploading={uploading}
               onPlayheadChange={setPlayhead}
@@ -1426,50 +1684,52 @@ export default function App() {
         </div>
         )}
 
-        {/* Bottom Boundless Tracks Timeline */}
-        <TimelineEditor
-          tracks={tracks}
-          clips={clips}
-          assetsMap={assetsMap}
-          fps={exportConfig.fps}
-          playhead={playhead}
-          selectedClipId={selectedClipId}
-          canUndo={historyDepth.past > 0}
-          canRedo={historyDepth.future > 0}
-          rippleMode={rippleMode}
-          freeformRoughCut={freeformRoughCut}
-          markIn={markIn}
-          markOut={markOut}
-          onSelectClip={(id) => {
-            setSelectedClipId(id);
-            setGradeTargetAssetId(null);
-          }}
-          onPlayheadChange={(t) => {
-            setIsPlaying(false);
-            setPlayhead(t);
-          }}
-          onAddTrack={(kind, role) => handleAddTrack(kind, undefined, role)}
-          onMoveTrack={handleMoveTrack}
-          onUpdateTrack={handleUpdateTrack}
-          onDeleteTrack={handleDeleteTrack}
-          onUpdateClip={handleUpdateClip}
-          onSplitAtPlayhead={handleSplitAtPlayhead}
-          onDeleteClip={handleDeleteClip}
-          onDuplicateClip={handleDuplicateClip}
-          onDropAssetOnTrack={handleDropAssetOnTrack}
-          onDropAssetCreateTrack={handleDropAssetCreateTrack}
-          onUndo={handleUndo}
-          onRedo={handleRedo}
-          onToggleRippleMode={() => setRippleMode((r) => !r)}
-          onToggleFreeformRoughCut={() => {
-            setFreeformRoughCut((prev) => {
-              const next = !prev;
-              notify(next ? 'Endless Rough Cut enabled (snap unlocked)' : 'Standard Snapping restored');
-              return next;
-            });
-          }}
-          onCommitHistory={commitHistory}
-        />
+        {/* Bottom Boundless Tracks Timeline (hidden in dedicated Quick Render page for simpler focus) */}
+        {mode !== 'quickrender' && (
+          <TimelineEditor
+            tracks={tracks}
+            clips={clips}
+            assetsMap={assetsMap}
+            fps={exportConfig.fps}
+            playhead={playhead}
+            selectedClipId={selectedClipId}
+            canUndo={historyDepth.past > 0}
+            canRedo={historyDepth.future > 0}
+            rippleMode={rippleMode}
+            freeformRoughCut={freeformRoughCut}
+            markIn={markIn}
+            markOut={markOut}
+            onSelectClip={(id) => {
+              setSelectedClipId(id);
+              setGradeTargetAssetId(null);
+            }}
+            onPlayheadChange={(t) => {
+              setIsPlaying(false);
+              setPlayhead(t);
+            }}
+            onAddTrack={(kind, role) => handleAddTrack(kind, undefined, role)}
+            onMoveTrack={handleMoveTrack}
+            onUpdateTrack={handleUpdateTrack}
+            onDeleteTrack={handleDeleteTrack}
+            onUpdateClip={handleUpdateClip}
+            onSplitAtPlayhead={handleSplitAtPlayhead}
+            onDeleteClip={handleDeleteClip}
+            onDuplicateClip={handleDuplicateClip}
+            onDropAssetOnTrack={handleDropAssetOnTrack}
+            onDropAssetCreateTrack={handleDropAssetCreateTrack}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
+            onToggleRippleMode={() => setRippleMode((r) => !r)}
+            onToggleFreeformRoughCut={() => {
+              setFreeformRoughCut((prev) => {
+                const next = !prev;
+                notify(next ? 'Endless Rough Cut enabled (snap unlocked)' : 'Standard Snapping restored');
+                return next;
+              });
+            }}
+            onCommitHistory={commitHistory}
+          />
+        )}
       </main>
 
       <ExportModal
@@ -1494,9 +1754,9 @@ export default function App() {
         <div
           role="status"
           aria-live="polite"
-          className="fixed bottom-4 right-4 z-50 px-3.5 py-2 rounded-md bg-[#171c26] border border-blue-500/40 text-xs text-slate-100 shadow-lg flex items-center gap-2 pointer-events-none"
+          className="fixed bottom-4 right-4 z-50 px-3.5 py-2 rounded-md bg-white dark:bg-[#171c26] border border-blue-400 dark:border-blue-500/40 text-xs text-slate-900 dark:text-slate-100 shadow-lg flex items-center gap-2 pointer-events-none"
         >
-          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <Check className="w-3.5 h-3.5 text-emerald-500 dark:text-emerald-400 shrink-0" />
           <span>{toastMsg}</span>
         </div>
       )}

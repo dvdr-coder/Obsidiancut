@@ -12,11 +12,12 @@
 1. [Key Features](#key-features)
 2. [Total Working & End-to-End Architecture](#total-working--end-to-end-architecture)
 3. [Complete Step-by-Step Tutorials](#complete-step-by-step-tutorials)
-4. [Tutorial References & Learning Index](#tutorial-references--learning-index)
-5. [Batch Automation with `autoengine` (HJSON CLI)](#batch-automation-with-autoengine-hjson-wrapper)
-6. [Keyboard & Mouse Shortcuts](#keyboard--mouse-shortcuts)
-7. [Installation & Setup (Windows, WSL, Linux)](#installation--setup-windows-wsl-and-linux)
-8. [Backend API Endpoints](#backend-api-endpoints)
+4. [Advanced Studio Complete Guide (Fusion · Fairlight · MultiMaster · Transitions)](#advanced-studio-complete-guide-fusion--fairlight--multimaster--transitions)
+5. [Tutorial References & Learning Index](#tutorial-references--learning-index)
+6. [Batch Automation with `autoengine` (HJSON CLI)](#batch-automation-with-autoengine-hjson-wrapper)
+7. [Keyboard & Mouse Shortcuts](#keyboard--mouse-shortcuts)
+8. [Installation & Setup (Windows, WSL, Linux)](#installation--setup-windows-wsl-and-linux)
+9. [API Endpoints Usage Guide](#api-endpoints-usage-guide)
 
 ---
 
@@ -33,10 +34,14 @@
   - **Music Cuts & Audio Transitions**: Razor-split music at playhead (`S` or **Cut @ Playhead**), **Loop / Repeat** segments seamlessly, pick **Fade Curve Shapes** (`S-Curve`, `Linear`, `Exponential`, `Logarithmic`), and click the emerald seam badge (`♪`) between adjacent music clips to apply **Equal-Power Crossfade**, **Linear Crossfade**, or **Dip & Swell** (`0.2s–4.0s`).
 - **Advanced Mode (`Fusion · Fairlight · MultiMaster · Transitions`)**:
   - **Fusion VFX & Keyframe Animation Controller**: Node-based VFX graph, 3D particle systems, rotoscoping, camera tracker, Krokodove motion graphics, plus a **Keyframe Animation Controller & Visual Spline Graph Editor** (`Opacity`, `Scale`, `Position X`, `Position Y`, `Rotation` with `Linear`, `Ease In`, `Ease Out`, `Ease In/Out` curves exported directly to FFmpeg).
-  - **Fairlight Audio Post-Production**: Folder-track submix buses, parametric 3-band EQ, Dynamics Compressor/Limiter, De-Esser, ADR cue recording, and VST plugin routing.
-  - **MultiMaster & 30-Effect Transition Library**: Precision timeline trimming, **Nested Timelines**, multi-camera sync, team **Power Bins & Smart Bins**, plus 30 video `xfade` transitions (`Fade`, `Dissolve`, `Wipe`, `Dip to Black/White`, directional wipes/slides, `Iris`, `Radial`, `Pixelize`, `Squeeze`).
+  - **Fairlight Audio Post-Production**: Folder-track submix buses, **Stereo L/R dBFS Audio Meters** with peak-hold & clipping indicators, **Audio Normalizer** (EBU R128 `-14` / `-16` / `-23` LUFS master & per-track `loudnorm` + 1-click clip peak auto-level), **Clip Crossfade Editor** (`Linear`, `Exponential`, `S-Curve` with waveform overlap preview & seam audition), parametric 3-band EQ, Dynamics Compressor/Limiter, VST plugin routing, and ADR cue recording.
+  - **MultiMaster & 30-Effect Transition Library**: Precision timeline trimming (`Pointer`, `Ripple`, `Roll`, `Slip`, `Slide`), **Nested Timelines**, multi-camera sync, team **Power Bins & Smart Bins**, plus 30 video `xfade` transitions (`Fade`, `Dissolve`, `Wipe`, `Dip to Black/White`, directional wipes/slides, `Iris`, `Radial`, `Pixelize`, `Squeeze`).
+- **Quick Render Page (Simpler & Faster In-Page Export)**:
+  - Dedicated 4th top-level studio page (**Quick Render**) focused purely on fast exports directly inside the page—with 1-click speed/platform presets (`Lightning Draft 720p · Ultrafast`, `Fast YouTube 1080p`, `Vertical Reels 9:16`, `Square Social 1:1`), integrated **Audio Normalizer + Live Stereo L/R Level Check**, real-time FFmpeg progress & speed readout, and an embedded `<video>` player + direct Download button without modal clutter.
+- **Live Audio Meters, Spectrum Visualizer & Normalizer Everywhere**:
+  - Compact **Master Stereo L/R Peak/RMS dBFS Meter** and toggleable **RTA Spectrum** drawer inside the Preview transport bar, full 48-band **Real-Time Audio Spectrum Visualizer** (`Bars`, `Curve`, `Mirror` modes with peak-hold & logarithmic `36 Hz – 15.5 kHz` frequency scale powered by Web Audio `AnalyserNode` FFT + Fairlight EQ DSP) in **Fairlight Audio Studio**, compact **Master Audio Spectrum** in **Quick Render**, plus **Auto-Normalize Clip Level** and FFmpeg `loudnorm`.
 - **Direct Canvas Resize/Crop, Chroma Key & Vector Titles**:
-  - Drag corner handles on the live preview canvas to resize/scale overlays (`TL / TR / BL / BR / Full` presets), toggle **Crop** mode (`16:9`, `9:16`, `1:1`, `4:5`, `Free`), apply Ken Burns motion, speed ramps (`0.25x–4.0x`), Reverse playback, and Chroma Key.
+  - Drag corner handles on the live preview canvas to resize/scale overlays (`TL / TR / BL / BR / Full` presets), toggle **Crop** mode (`16:9`, `9:16`, `1:1`, `4:5`), apply Ken Burns motion, speed ramps (`0.25x–4.0x`), Reverse playback, and Chroma Key.
   - Design **Main Cinema Title**, **Lower Third**, **Subtitle**, **Vector Crest**, and **Scrolling Credits** with Sans/Display/Serif/Mono fonts and full `#RRGGBB` / `#RGB` color pickers.
 - **Per-Picture & Master Color Grading Plug-in**:
   - Grade individual uploaded photos from the Media Bin (**Palette** icon) or Clip Inspector (`This Picture` scope) and **Sync to Timeline Clips**, or apply Master Timeline grades (`Teal & Orange`, `Warm Film`, `Mono Noir`, `Matte Fade`, `Vivid HDR`) with instant **Before/After (Compare)** bypass.
@@ -145,9 +150,53 @@ You can also open the interactive **Tutorial** walkthrough from the top bar at a
 1. Open **Titles & Credits** in the Media Bin to insert `Main Cinema Title`, `Lower Third`, `Subtitle`, `Vector Crest`, or `Scrolling Credits` using Sans/Display/Serif/Mono fonts and exact `#RRGGBB` / `#RGB` hex colors.
 2. Click the **Palette** icon on any photo in the Media Bin (or **Color Grade This Picture** in Clip Inspector) to grade individual pictures and sync across timeline clips, or switch to **Master Timeline** scope with **Compare (Bypass)** toggle.
 
-### Tutorial 7: Export & Auto-Download
-1. Click **Export HD** in the top-right bar, pick resolution (`720p`, `1080p`, `4K UHD`, `1080x1920`, `1080x1080`), FPS (`23.976`–`60`), format (`MP4`, `MOV`, `WebM`), and quality preset.
-2. Click **Start HD Render** — rendering runs asynchronously in Python + FFmpeg and auto-downloads when finished.
+### Tutorial 7: Quick Render Page, Audio Normalizer & Export HD
+1. **Fast In-Page Export (`Quick Render`)**: Click **Quick Render** in the top navigation bar or mode switcher for a streamlined export-only workspace:
+   - Choose a 1-click preset (**Lightning Draft 720p · Ultrafast**, **Fast YouTube 1080p**, **Vertical Reels 9:16**, or **Square Social 1:1**).
+   - Enable **Audio Normalizer** (`-14 LUFS` YouTube/Web, `-16 LUFS` Social/Mobile, or `-23 LUFS` Broadcast EBU), scrub or play back to inspect the live **Master L/R Meter**, or click **Auto-Level All Audio Clips**.
+   - Click **Start Fast Render** — watch live FFmpeg progress/speed (`e.g. 3.4x`), play back the finished video right inside the page, and click **Download Video File**.
+2. **Modal Export from Any Workspace**: Click **Export HD** in the top-right bar from Auto Sync, Endless Workspace, or Advanced Studio to configure resolution (`720p`–`4K UHD`), CFR frame rate (`23.976`–`60`), container (`MP4`, `MOV`, `WebM`), encoder speed, and EBU R128 loudness normalization, then render in the background while continuing to edit.
+
+---
+
+## Advanced Studio Complete Guide (Fusion · Fairlight · MultiMaster · Transitions)
+
+Switch to **Advanced Studio** (via the top nav or **Advanced Mode** switcher) to access the four professional post-production sub-studios:
+
+### 1. Fusion — VFX, Motion Graphics & Keyframe Graph Editor
+- **Keyframe Animation Controller & Visual Spline Graph Editor** (`src/components/KeyframeGraphEditor.tsx`):
+  - Select any visual or title clip on the timeline and switch to **Fusion → Keyframe Graph**.
+  - Scrub the playhead anywhere inside the clip, pick a parameter (**Opacity**, **Scale**, **Pos X**, **Pos Y**, **Rotation**), and click **+ Keyframe (`◆`)** at start/mid/end timestamps (or apply quick presets like **Zoom In**, **Slide Reveal**, **Ken Burns Drift**, **Spin Pop**).
+  - Click between keyframe diamonds to choose easing curves (**Linear**, **Ease In**, **Ease Out**, **Ease In/Out**) and drag nodes visually on the spline chart. Keyframes evaluate smoothly in real time on the 2D Canvas and compile directly into per-frame FFmpeg expressions (`eval=frame` `scale`, `rotate`, `geq`, and `overlay`).
+- **Node-Based VFX, 3D Particles, Rotoscoping, Camera Tracker & Krokodove**:
+  - Enable **3D Particle Emitter** (`Embers`, `Snow`, `Stardust`, `Sparks`) with adjustable density & tint.
+  - Enable **Rotoscoping Mask** and click points directly on the viewport frame to isolate or invert foreground subjects with adjustable feathering (`0–40 px`).
+  - Run **Planar Camera Tracker** to lock motion offsets, or add **Krokodove Motion Graphics** (`HUD Rings`, `Kaleido Array`, `Glitch Slice`, `Extrude Grid`) and bake overlays cleanly to your timeline.
+
+### 2. Fairlight — Audio Post-Production, Stereo Meters, Normalizer & Crossfades
+- **Folder-Track Hierarchy & Multi-Track Console**:
+  - Create **Folder Buses** (e.g., *Dialogue Bus*, *Music Stem*, *SFX Submix*) and assign child audio tracks (`A1`, `A2`, …) with independent **Solo (`S`)**, **Mute (`M`)**, and **Volume Faders**.
+- **Stereo L/R Audio Meters (`AudioMeterBar.tsx`)**:
+  - Every track channel strip and the **Master Bus** displays dual **L / R dBFS Peak/RMS meters** (`-48 dB` to `0 dB` green → amber → red scale) with white **peak-hold markers**, clipping warnings, and real-time **LUFS loudness readout** (also shown in compact form on the main Preview Canvas transport bar).
+- **Audio Normalizer (3 Levels of Normalization)**:
+  1. **Master Bus Loudness Normalizer**: Toggle **Normalizer ON** on the Master Bus strip (or in **Quick Render** / **Export HD**) and select **`-14 LUFS`** (YouTube/Streaming), **`-16 LUFS`** (Podcast/Mobile), or **`-23 LUFS`** (Broadcast EBU R128). Export runs FFmpeg `loudnorm=I=<target>:TP=-1.5:LRA=11` at unified `48 kHz` stereo.
+  2. **Per-Track DSP `Norm`**: Select any track in Fairlight → **Channel EQ & Dynamics** → toggle **`Norm`** and pick the track's LUFS target so dialogue stems and music stems hit independent loudness ceilings before mixing.
+  3. **Per-Clip Peak Auto-Level**: Click **Normalize All Clips** in Fairlight / Quick Render—or **Auto-Normalize Clip Level (-1.5 dB Peak)** in the Clip Inspector—to compute optimal clip `volume` from each waveform's analyzed peak/RMS profile.
+- **Audio Clip Crossfade UI (`Mixer + Xfade` / `Crossfades` View)**:
+  - Automatically detects overlapping and consecutive audio segments on every track.
+  - Pick **Linear** (`tri`), **Exponential** (`exp`), or **S-Curve** (`hsin` smooth equal-blend), adjust **Crossfade Duration** (`0.10s–5.00s` slider, numeric input, or quick presets `0.25s / 0.75s / 1.50s / 3.00s`), click **Overlap Clips** to physically overlap segments cleanly, and click **Audition Seam** to preview right across the transition.
+- **DSP Rack & ADR Dialogue Booth**:
+  - Dial in **3-Band EQ** (`110 Hz` Low, `1.2 kHz` Mid, `6.5 kHz` High), **Compressor**, **Limiter**, **Reverb Send**, and **VST3 Plugin Inserts** (`Obsidian Comp-1176`, `Studio Param-EQ 4`, `Dialogue De-Esser Pro`, `ConvoVerb Scoring Hall`, `Warm Tape Saturator`, `Broadcast Limiter L2`).
+  - Use the **ADR Booth** with 3-2-1 countdown, Cue In/Duration controls, microphone capture (with calibrated synthetic slate fallback in headless/sandbox environments), and 1-click **Commit to Track**.
+
+### 3. MultiMaster — Precision Trimming, Nested Timelines & Team Bins
+- **5 Trim Modes**: Switch seamlessly between **Pointer**, **Ripple** (auto-closes gaps), **Roll** (moves edit point between adjacent clips A & B), **Slip** (shifts source `trimStart` inside clip bounds), and **Slide** (repositions clip between neighbors).
+- **Mark In / Mark Out (`I` / `O`) & Range Extract**: Mark a timeline range and run **Ripple Extract Range** to excise sections cleanly across tracks.
+- **Nested Timelines & Multi-Camera Sync**: Bundle multi-track sections into reusable **Nested Sequences** (`Compound Clips`), load/manage sequences, and switch **Multi-Cam Angles** synchronized by timecode.
+- **Power Bins & Smart Bins**: Save reusable team assets in **Power Bins** and auto-filter footage via rule-driven **Smart Bins** (e.g., *All Audio ≥ 110 BPM*, *VFR Footage*, *Color-Graded Shots*, *HD/4K Assets*).
+
+### 4. Transition Library (30 FFmpeg `xfade` Transitions)
+- Open **Advanced Studio → Transition Library** (or **Clip Inspector → Transitions**) to browse grouped transitions (**Core**, **Fade Variants**, **Wipe & Slide**, **Geometric & Stylized**, **Lens & Blur**) and apply to the selected clip or across all visual clips at once (`0.1s–1.8s`).
 
 ---
 
@@ -158,13 +207,15 @@ Use these built-in references inside the codebase to explore, customize, or auto
 | Topic / Feature Area | In-App Entry Point | Source / Documentation Reference |
 | :--- | :--- | :--- |
 | **Interactive Guided Tour (7 Steps)** | Top Bar → **Tutorial** button | [`src/components/TutorialModal.tsx`](src/components/TutorialModal.tsx) |
-| **Music Layers, Waveforms, Envelopes & Ducking** | Timeline Audio Clips & Inspector → **Music Layer & Volume Envelope** | [`src/components/TimelineEditor.tsx`](src/components/TimelineEditor.tsx), [`src/components/ClipInspectorPanel.tsx`](src/components/ClipInspectorPanel.tsx), [`src/utils/timelineMath.ts`](src/utils/timelineMath.ts) |
+| **Quick Render (In-Page Fast Export)** | Top Bar / Mode Bar → **Quick Render** | [`src/components/QuickRenderPage.tsx`](src/components/QuickRenderPage.tsx) |
+| **Stereo L/R Audio Meters & Normalizer** | Transport Bar, Fairlight Console & Quick Render | [`src/components/AudioMeterBar.tsx`](src/components/AudioMeterBar.tsx), [`src/utils/timelineMath.ts`](src/utils/timelineMath.ts) |
+| **Music Layers, Waveforms, Envelopes & Ducking** | Timeline Audio Clips & Inspector → **Music Layer & Volume Envelope** | [`src/components/TimelineEditor.tsx`](src/components/TimelineEditor.tsx), [`src/components/ClipInspectorPanel.tsx`](src/components/ClipInspectorPanel.tsx) |
 | **Endless Workspace & Boundless Tracks** | Mode Toggle → **Endless Workspace** | [`src/components/TimelineEditor.tsx`](src/components/TimelineEditor.tsx), [`src/App.tsx`](src/App.tsx) |
 | **Fusion Keyframes & Visual Graph Editor** | Mode Toggle → **Advanced Studio → Fusion** | [`src/components/KeyframeGraphEditor.tsx`](src/components/KeyframeGraphEditor.tsx), [`src/components/FusionVfxStudio.tsx`](src/components/FusionVfxStudio.tsx) |
-| **Fairlight Audio DSP, Buses & ADR** | Mode Toggle → **Advanced Studio → Fairlight** | [`src/components/FairlightAudioStudio.tsx`](src/components/FairlightAudioStudio.tsx) |
-| **MultiMaster Trim, Nested Sequences & Bins** | Mode Toggle → **Advanced Studio → MultiMaster** | [`src/components/MultiMasterStudio.tsx`](src/components/MultiMasterStudio.tsx) |
+| **Fairlight Audio DSP, Crossfades, Buses & ADR** | Mode Toggle → **Advanced Studio → Fairlight** | [`src/components/FairlightAudioStudio.tsx`](src/components/FairlightAudioStudio.tsx) |
+| **MultiMaster Trim, Nested Sequences & Bins** | Mode Toggle → **Advanced Studio → MultiMaster** | [`src/components/MultiMasterEditStudio.tsx`](src/components/MultiMasterEditStudio.tsx) |
 | **Real-Time Canvas & Web Audio Compositor** | Center Viewport | [`src/components/PreviewCanvas.tsx`](src/components/PreviewCanvas.tsx) |
-| **FFmpeg Filtergraph & Export Compiler** | **Export HD** Modal | [`backend/engine.py`](backend/engine.py), [`server.ts`](server.ts) |
+| **FFmpeg Filtergraph & Export Compiler** | **Quick Render** / **Export HD** Modal | [`backend/engine.py`](backend/engine.py), [`server.ts`](server.ts) |
 | **Declarative HJSON Batch CLI** | Terminal CLI | [`autoengine/README.md`](autoengine/README.md), [`autoengine/examples/batch_videos.hjson`](autoengine/examples/batch_videos.hjson) |
 
 ---
@@ -226,6 +277,11 @@ See [`autoengine/README.md`](autoengine/README.md) and [`autoengine/examples/bat
   ```
 
 ### 2. Run Obsidian Cut
+Quick-start with the bundled launcher script (installs dependencies automatically if missing):
+```bash
+./run.sh
+```
+Or run manually:
 ```bash
 npm install
 npm run dev
@@ -244,18 +300,235 @@ npm run start
 
 ---
 
-## Backend API Endpoints
+## API Endpoints Usage Guide
+
+All client and automation traffic goes through the Node/Express gateway on **`http://localhost:3000/api/*`**, which handles multipart uploads, HTTP `206 Partial Content` Range streaming, and local IPC proxying to the Python FFmpeg engine (`backend/engine.py`).
+
+### Endpoint Summary
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `GET` | `/api/health` | Engine status & resolved Python binary check |
-| `GET` | `/api/media` | List all imported media assets & proxy metadata |
-| `POST` | `/api/media/upload` | Upload multiple images, videos, or audio files (auto-probes codecs/VFR/BPM & generates proxies) |
-| `PATCH` | `/api/media/:id/color-grade` | Persist per-picture color grading settings for an uploaded photo |
-| `GET` | `/api/media/proxy/:id` | Stream lightweight editing proxy with HTTP Range support |
-| `GET` | `/api/media/file/:id` | Stream original master media with HTTP Range (`206 Partial Content`) |
-| `POST` | `/api/sample-pack` | Load built-in HD sample photos + synthesized 120 BPM track |
-| `DELETE` | `/api/media/:id` | Delete media asset, thumbnail, and proxy file |
-| `POST` | `/api/render` | Enqueue background Python + FFmpeg multi-track render job |
-| `GET` | `/api/render/:jobId` | Poll render progress, speed, or completion status |
-| `GET` | `/api/render/:jobId/download` | Download completed video file (`Content-Disposition: attachment`) |
+| `GET` | `/api/health` | Check Express gateway & Python FFmpeg engine readiness |
+| `GET` | `/api/media` | List all imported media assets with dimensions, FPS, BPM & waveforms |
+| `POST` | `/api/media/upload` | Upload up to 100 images, videos, or audio files (`multipart/form-data`, field `files`) |
+| `PATCH` | `/api/media/:id/color-grade` | Persist per-picture color grading settings on an imported asset |
+| `GET` | `/api/media/thumb/:id` | Fetch generated JPEG thumbnail for image/video assets |
+| `GET` | `/api/media/proxy/:id` | Stream lightweight editing proxy (`480p` MP4 / `1280px` JPG / PNG / M4A) with Range support |
+| `GET` | `/api/media/file/:id` | Stream original master upload with HTTP Range (`206 Partial Content`) |
+| `POST` | `/api/audio/analyze` | Re-run BPM beat detection & 220-bin waveform extraction for an audio `assetId` |
+| `POST` | `/api/sample-pack` | Populate the workspace with built-in HD sample photos + synthesized 120 BPM WAV |
+| `DELETE` | `/api/media/:id` | Delete media asset, thumbnail, and proxy files from disk |
+| `POST` | `/api/render` | Enqueue an asynchronous multi-track Python + FFmpeg render job (`202 Accepted`) |
+| `GET` | `/api/render/:jobId` | Poll render status (`queued`, `rendering`, `completed`, `failed`), `%` progress & speed |
+| `GET` | `/api/render/:jobId/download` | Download completed file (`?inline=1` streams with HTTP `206` Range for `<video>`) |
+
+---
+
+### 1. Health Check (`GET /api/health`)
+
+```bash
+curl -s http://localhost:3000/api/health
+```
+```json
+{
+  "ok": true,
+  "node": true,
+  "python": { "ok": true, "engine": "python-ffmpeg", "platform": "posix" }
+}
+```
+
+### 2. Upload Media Files (`POST /api/media/upload`)
+
+Send one or more media files using multipart field name **`files`** (max `100` files, `1 GB` per file). The Python engine automatically probes codecs, VFR/CFR frame rates, thumbnails, smart proxies, BPM, beat timestamps, and waveform bars.
+
+```bash
+curl -X POST http://localhost:3000/api/media/upload \
+  -F "files=@./clip1.mp4" \
+  -F "files=@./soundtrack.mp3"
+```
+
+```json
+{
+  "assets": [
+    {
+      "id": "a1b2c3d4e5f6",
+      "name": "soundtrack.mp3",
+      "mediaType": "audio",
+      "duration": 16.0,
+      "bpm": 120,
+      "beats": [0.5, 1.0, 1.5],
+      "waveform": [0.42, 0.88, 0.61],
+      "fileUrl": "/api/media/file/a1b2c3d4e5f6"
+    }
+  ],
+  "rejected": []
+}
+```
+
+### 3. Load Built-In Sample Pack (`POST /api/sample-pack`) & List Assets (`GET /api/media`)
+
+```bash
+curl -X POST http://localhost:3000/api/sample-pack
+curl -s http://localhost:3000/api/media
+```
+
+### 4. Persist Per-Picture Color Grade (`PATCH /api/media/:id/color-grade`)
+
+```bash
+curl -X PATCH http://localhost:3000/api/media/a1b2c3d4e5f6/color-grade \
+  -H "Content-Type: application/json" \
+  -d '{
+    "colorGrade": {
+      "enabled": true,
+      "preset": "cinematic_teal",
+      "exposure": 0.04,
+      "contrast": 1.12,
+      "saturation": 1.08,
+      "gamma": 1.0,
+      "temperature": -0.05,
+      "tint": 0.02,
+      "vignette": 0.25
+    }
+  }'
+```
+
+### 5. Re-Analyze Audio BPM & Waveform (`POST /api/audio/analyze`)
+
+```bash
+curl -X POST http://localhost:3000/api/audio/analyze \
+  -H "Content-Type: application/json" \
+  -d '{ "assetId": "a1b2c3d4e5f6" }'
+```
+
+### 6. Enqueue Multi-Track Render (`POST /api/render`)
+
+Submit the full timeline JSON (`tracks`, `clips`, `colorGrade`, `export`) including Fairlight DSP (`normalizeEnabled`, `normalizeTargetLufs`), Fusion `keyframes`, audio `volumeEnvelope` ramps, `backgroundDucking`, `audioTransitionOut` crossfade curves, and Master `export.normalizeAudio`:
+
+```bash
+curl -X POST http://localhost:3000/api/render \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tracks": [
+      { "id": "trk_v1", "name": "V1", "kind": "video", "muted": false, "solo": false, "hidden": false, "volume": 1 },
+      {
+        "id": "trk_a1",
+        "name": "A1 Music",
+        "kind": "audio",
+        "muted": false,
+        "solo": false,
+        "hidden": false,
+        "volume": 1,
+        "audioDsp": {
+          "eqLowDb": 0,
+          "eqMidDb": 0,
+          "eqHighDb": 1.5,
+          "compressorEnabled": true,
+          "limiterEnabled": true,
+          "reverbMix": 0,
+          "normalizeEnabled": true,
+          "normalizeTargetLufs": -16,
+          "vstSlots": []
+        }
+      }
+    ],
+    "clips": [
+      {
+        "id": "cl_v1",
+        "trackId": "trk_v1",
+        "kind": "image",
+        "mediaId": "<IMAGE_ASSET_ID>",
+        "startTime": 0,
+        "duration": 4.0,
+        "trimStart": 0,
+        "fit": "cover",
+        "scale": 1,
+        "x": 0,
+        "y": 0,
+        "rotation": 0,
+        "opacity": 1,
+        "motion": "zoomIn",
+        "transitionOut": "fade",
+        "transitionDuration": 0.5,
+        "fadeIn": 0,
+        "fadeOut": 0,
+        "speed": 1,
+        "reverse": false,
+        "muted": false,
+        "volume": 1,
+        "pan": 0,
+        "effects": {}
+      },
+      {
+        "id": "cl_a1",
+        "trackId": "trk_a1",
+        "kind": "audio",
+        "mediaId": "<AUDIO_ASSET_ID>",
+        "startTime": 0,
+        "duration": 4.0,
+        "trimStart": 0,
+        "muted": false,
+        "volume": 0.9,
+        "pan": 0,
+        "fadeIn": 0.3,
+        "fadeOut": 0.6,
+        "audioFadeCurve": "scurve",
+        "audioTransitionOut": "crossfade_eq",
+        "audioTransitionDuration": 1.0,
+        "audioCrossfadeCurve": "scurve",
+        "backgroundDucking": false,
+        "speed": 1,
+        "reverse": false
+      }
+    ],
+    "colorGrade": { "enabled": false, "preset": "none", "exposure": 0, "contrast": 1, "saturation": 1, "gamma": 1, "temperature": 0, "tint": 0, "vignette": 0 },
+    "export": {
+      "resolution": "1920x1080",
+      "fps": 30,
+      "format": "mp4",
+      "speedProfile": "veryfast",
+      "autoDownload": true,
+      "normalizeAudio": true,
+      "normalizeTargetLufs": -14
+    }
+  }'
+```
+Response (`202 Accepted`):
+```json
+{ "jobId": "9f8e7d6c5b4a", "status": "queued" }
+```
+
+### 7. Poll Render Progress (`GET /api/render/:jobId`) & Download (`GET /api/render/:jobId/download`)
+
+```bash
+# Poll status until status == "completed"
+curl -s http://localhost:3000/api/render/9f8e7d6c5b4a
+
+# Download finished video to disk
+curl -L -o output.mp4 http://localhost:3000/api/render/9f8e7d6c5b4a/download
+
+# Or stream inline inside HTML5 <video> with HTTP 206 byte-range seeking
+# http://localhost:3000/api/render/9f8e7d6c5b4a/download?inline=1
+```
+
+### End-to-End JavaScript (`fetch`) Automation Example
+
+```ts
+// 1. Enqueue render
+const startRes = await fetch('http://localhost:3000/api/render', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ tracks, clips, colorGrade, export: { resolution: '1280x720', fps: 30, format: 'mp4', speedProfile: 'ultrafast', normalizeAudio: true, normalizeTargetLufs: -14 } }),
+});
+const { jobId } = await startRes.json();
+
+// 2. Poll until completed
+while (true) {
+  const status = await (await fetch(`http://localhost:3000/api/render/${jobId}`)).json();
+  if (status.status === 'completed') {
+    console.log('Ready:', `http://localhost:3000/api/render/${jobId}/download`);
+    break;
+  }
+  if (status.status === 'failed') throw new Error(status.error);
+  await new Promise((r) => setTimeout(r, 700));
+}
+```

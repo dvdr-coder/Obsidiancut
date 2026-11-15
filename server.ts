@@ -163,6 +163,20 @@ async function waitForPythonEngine(maxWaitMs = 5000): Promise<void> {
   }
 }
 
+const SAFE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+function isValidSafeId(id: unknown): id is string {
+  return typeof id === 'string' && SAFE_ID_RE.test(id);
+}
+
+class PythonEngineError extends Error {
+  statusCode: number;
+  constructor(message: string, statusCode = 500) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
 function callPythonJson<T = Record<string, unknown>>(
   method: string,
   pyPath: string,
@@ -191,12 +205,12 @@ function callPythonJson<T = Record<string, unknown>>(
           try {
             const parsed = JSON.parse(text || '{}');
             if ((res.statusCode || 500) >= 400) {
-              reject(new Error(parsed.error || `Python engine error (${res.statusCode})`));
+              reject(new PythonEngineError(parsed.error || `Python engine error (${res.statusCode})`, res.statusCode || 500));
             } else {
               resolve(parsed as T);
             }
           } catch {
-            reject(new Error(`Invalid JSON from Python engine: ${text.slice(0, 200)}`));
+            reject(new PythonEngineError(`Invalid JSON from Python engine: ${text.slice(0, 200)}`, res.statusCode || 502));
           }
         });
       },
@@ -459,6 +473,10 @@ async function bootstrap() {
   });
 
   app.patch('/api/media/:id/color-grade', (req, res) => {
+    if (!isValidSafeId(req.params.id)) {
+      res.status(400).json({ error: 'Invalid asset ID' });
+      return;
+    }
     const asset = assetRegistry.get(req.params.id);
     if (!asset) {
       res.status(404).json({ error: 'Asset not found' });
@@ -475,6 +493,10 @@ async function bootstrap() {
   });
 
   app.delete('/api/media/:id', (req, res) => {
+    if (!isValidSafeId(req.params.id)) {
+      res.status(400).json({ error: 'Invalid asset ID' });
+      return;
+    }
     const asset = assetRegistry.get(req.params.id);
     if (!asset) {
       res.status(404).json({ error: 'Asset not found' });
@@ -579,6 +601,10 @@ async function bootstrap() {
   });
 
   app.get('/api/media/thumb/:id', (req, res) => {
+    if (!isValidSafeId(req.params.id)) {
+      res.status(400).json({ error: 'Invalid asset ID' });
+      return;
+    }
     const thumbPath = path.join(THUMB_DIR, `${req.params.id}.jpg`);
     if (!fs.existsSync(thumbPath)) {
       res.status(404).end();
@@ -590,6 +616,10 @@ async function bootstrap() {
   });
 
   app.get('/api/media/proxy/:id', (req, res) => {
+    if (!isValidSafeId(req.params.id)) {
+      res.status(400).json({ error: 'Invalid asset ID' });
+      return;
+    }
     const proxyMp4 = path.join(PROXY_DIR, `${req.params.id}_proxy.mp4`);
     const proxyPng = path.join(PROXY_DIR, `${req.params.id}_proxy.png`);
     const proxyJpg = path.join(PROXY_DIR, `${req.params.id}_proxy.jpg`);
@@ -619,6 +649,10 @@ async function bootstrap() {
   });
 
   app.get('/api/media/file/:id', (req, res) => {
+    if (!isValidSafeId(req.params.id)) {
+      res.status(400).json({ error: 'Invalid asset ID' });
+      return;
+    }
     const asset = assetRegistry.get(req.params.id);
     if (!asset || !fs.existsSync(asset.filePath)) {
       res.status(404).json({ error: 'Media not found' });
@@ -628,38 +662,60 @@ async function bootstrap() {
   });
 
   app.post('/api/audio/analyze', async (req, res) => {
+    const assetId = req.body?.assetId;
+    if (!isValidSafeId(assetId)) {
+      res.status(400).json({ error: 'Missing or invalid assetId' });
+      return;
+    }
     try {
-      const result = await callPythonJson('POST', '/analyze-audio', req.body);
-      const asset = assetRegistry.get(req.body.assetId);
+      const result = await callPythonJson('POST', '/analyze-audio', { assetId });
+      const asset = assetRegistry.get(assetId);
       if (asset) {
         Object.assign(asset, result);
         saveAssetsIndex();
       }
       res.json(result);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      const code = err instanceof PythonEngineError ? err.statusCode : 500;
+      res.status(code).json({ error: (err as Error).message });
     }
   });
 
   app.post('/api/render', async (req, res) => {
+    const hasClips = Array.isArray(req.body?.clips) && req.body.clips.length > 0;
+    const hasSlides = Array.isArray(req.body?.slides) && req.body.slides.length > 0;
+    if (!hasClips && !hasSlides) {
+      res.status(400).json({ error: 'Render payload must include a non-empty clips array' });
+      return;
+    }
     try {
       const result = await callPythonJson('POST', '/render', req.body);
       res.status(202).json(result);
     } catch (err) {
-      res.status(500).json({ error: (err as Error).message });
+      const code = err instanceof PythonEngineError ? err.statusCode : 500;
+      res.status(code).json({ error: (err as Error).message });
     }
   });
 
   app.get('/api/render/:jobId', async (req, res) => {
+    if (!isValidSafeId(req.params.jobId)) {
+      res.status(400).json({ error: 'Invalid render job ID' });
+      return;
+    }
     try {
       const result = await callPythonJson('GET', `/render/${encodeURIComponent(req.params.jobId)}`);
       res.json(result);
     } catch (err) {
-      res.status(404).json({ error: (err as Error).message });
+      const code = err instanceof PythonEngineError ? err.statusCode : 404;
+      res.status(code).json({ error: (err as Error).message });
     }
   });
 
   app.get('/api/render/:jobId/download', (req, res) => {
+    if (!isValidSafeId(req.params.jobId)) {
+      res.status(400).json({ error: 'Invalid render job ID' });
+      return;
+    }
     const inline = req.query.inline === '1' ? '?inline=1' : '';
     const pyReq = http.request(
       {
@@ -705,7 +761,9 @@ async function bootstrap() {
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
-  process.on('SIGBREAK', shutdown);
+  if (process.platform === 'win32') {
+    process.on('SIGBREAK', shutdown);
+  }
 }
 
 bootstrap().catch((err) => {

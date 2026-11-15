@@ -101,9 +101,9 @@ export const HexColorField: React.FC<HexColorFieldProps> = ({
   };
 
   return (
-    <div className="space-y-1.5 rounded border border-[#232832] bg-[#101318] p-2">
+    <div className="space-y-1.5 rounded border border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#101318] p-2">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-medium text-slate-300">{label}</span>
+        <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300">{label}</span>
         <div className="flex items-center gap-1.5">
           {allowTransparent && (
             <button
@@ -118,8 +118,8 @@ export const HexColorField: React.FC<HexColorFieldProps> = ({
               }}
               className={`px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors cursor-pointer ${
                 isTransparent
-                  ? 'bg-blue-600/20 border-blue-500 text-blue-200'
-                  : 'bg-[#0e1116] border-[#2a303d] text-slate-400 hover:text-slate-200'
+                  ? 'bg-blue-50 dark:bg-blue-600/20 border-blue-500 text-blue-700 dark:text-blue-200'
+                  : 'bg-white dark:bg-[#0e1116] border-slate-300 dark:border-[#2a303d] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
             >
               {isTransparent ? 'Transparent' : 'Clear BG'}
@@ -131,8 +131,8 @@ export const HexColorField: React.FC<HexColorFieldProps> = ({
             title="Toggle quick color palette"
             className={`px-1.5 py-0.5 rounded text-[10px] border transition-colors cursor-pointer ${
               showSwatches
-                ? 'bg-[#1f2633] border-slate-500 text-white'
-                : 'bg-[#0e1116] border-[#2a303d] text-slate-400 hover:text-slate-200'
+                ? 'bg-slate-200 dark:bg-[#1f2633] border-slate-500 text-slate-900 dark:text-white'
+                : 'bg-white dark:bg-[#0e1116] border-slate-300 dark:border-[#2a303d] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
             Swatches
@@ -144,10 +144,10 @@ export const HexColorField: React.FC<HexColorFieldProps> = ({
         {/* Full-spectrum native OS RGB/HSL/Eyedropper picker */}
         <label
           title={`Open full color spectrum picker for ${label}`}
-          className="relative w-8 h-7 rounded border border-[#2a303d] overflow-hidden shrink-0 cursor-pointer focus-within:ring-2 focus-within:ring-blue-500"
+          className="relative w-8 h-7 rounded border border-slate-300 dark:border-[#2a303d] overflow-hidden shrink-0 cursor-pointer focus-within:ring-2 focus-within:ring-blue-500"
           style={{
             background: isTransparent
-              ? 'repeating-conic-gradient(#1f2430 0% 25%, #0e1116 0% 50%) 50% / 8px 8px'
+              ? 'repeating-conic-gradient(#cbd5e1 0% 25%, #f8fafc 0% 50%) 50% / 8px 8px'
               : pickerHex,
           }}
         >
@@ -182,7 +182,7 @@ export const HexColorField: React.FC<HexColorFieldProps> = ({
               (e.target as HTMLInputElement).blur();
             }
           }}
-          className="flex-1 min-w-0 h-7 px-2 rounded bg-[#0e1116] border border-[#2a303d] text-slate-100 font-mono-tabular text-[11px] uppercase tracking-wide focus:outline-none focus:border-blue-500"
+          className="flex-1 min-w-0 h-7 px-2 rounded bg-white dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 font-mono-tabular text-[11px] uppercase tracking-wide focus:outline-none focus:border-blue-500"
         />
       </div>
 
@@ -202,7 +202,7 @@ export const HexColorField: React.FC<HexColorFieldProps> = ({
                   onCommit?.();
                 }}
                 className={`h-4 w-full rounded-sm border transition-transform hover:scale-105 cursor-pointer ${
-                  active ? 'border-blue-400 ring-1 ring-blue-400' : 'border-[#2f3644]'
+                  active ? 'border-blue-500 ring-1 ring-blue-400' : 'border-slate-300 dark:border-[#2f3644]'
                 }`}
                 style={{ backgroundColor: swatch.hex }}
               />
@@ -233,7 +233,7 @@ export const TitleStyleControls: React.FC<TitleStyleControlsProps> = ({
     <div className="space-y-2">
       {/* Font Family Selection */}
       <label className="block space-y-1">
-        <span className="text-[11px] text-slate-400">Text Font Family</span>
+        <span className="text-[11px] text-slate-500 dark:text-slate-400">Text Font Family</span>
         <select
           aria-label="Text Font Family"
           value={spec.fontFamily || 'Outfit'}
@@ -242,7 +242,7 @@ export const TitleStyleControls: React.FC<TitleStyleControlsProps> = ({
             onCommit?.();
           }}
           style={{ fontFamily: `"${spec.fontFamily || 'Outfit'}", sans-serif` }}
-          className="w-full h-8 px-2 rounded bg-[#0e1116] border border-[#2a303d] text-slate-100 text-xs focus:outline-none focus:border-blue-500"
+          className="w-full h-8 px-2 rounded bg-white dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 text-xs focus:outline-none focus:border-blue-500"
         >
           {fontGroups.map((group) => (
             <optgroup key={group} label={group}>
@@ -259,7 +259,7 @@ export const TitleStyleControls: React.FC<TitleStyleControlsProps> = ({
       {/* Size & Alignment Row */}
       <div className="grid grid-cols-2 gap-2">
         {showFontSize && (
-          <label className="flex flex-col gap-1 text-[11px] text-slate-400">
+          <label className="flex flex-col gap-1 text-[11px] text-slate-500 dark:text-slate-400">
             <span>Font Scale</span>
             <input
               type="number"
@@ -274,14 +274,14 @@ export const TitleStyleControls: React.FC<TitleStyleControlsProps> = ({
                 })
               }
               onBlur={() => onCommit?.()}
-              className="h-7 px-2 rounded bg-[#0e1116] border border-[#2a303d] text-slate-100 font-mono-tabular focus:outline-none focus:border-blue-500"
+              className="h-7 px-2 rounded bg-white dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 font-mono-tabular focus:outline-none focus:border-blue-500"
             />
           </label>
         )}
 
-        <div className={`flex flex-col gap-1 text-[11px] text-slate-400 ${showFontSize ? '' : 'col-span-2'}`}>
+        <div className={`flex flex-col gap-1 text-[11px] text-slate-500 dark:text-slate-400 ${showFontSize ? '' : 'col-span-2'}`}>
           <span>Alignment</span>
-          <div className="grid grid-cols-3 h-7 rounded overflow-hidden border border-[#2a303d] bg-[#0e1116]">
+          <div className="grid grid-cols-3 h-7 rounded overflow-hidden border border-slate-300 dark:border-[#2a303d] bg-white dark:bg-[#0e1116]">
             {(
               [
                 { value: 'left', icon: AlignLeft, label: 'Align Left' },
@@ -304,7 +304,7 @@ export const TitleStyleControls: React.FC<TitleStyleControlsProps> = ({
                   className={`flex items-center justify-center transition-colors cursor-pointer ${
                     active
                       ? 'bg-blue-600 text-white'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-[#171b22]'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-[#171b22]'
                   }`}
                 >
                   <Icon className="w-3.5 h-3.5" />

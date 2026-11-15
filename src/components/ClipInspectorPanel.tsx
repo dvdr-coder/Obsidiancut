@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -33,6 +33,7 @@ import { TitleStyleControls } from './TitleStyleControls';
 import { getPluginFault, resetPluginFault, sanitizeClipEffects } from '../utils/pluginSandbox';
 import {
   computeAspectCropPreset,
+  computeClipNormalizeGain,
   DEFAULT_CLIP_CROP,
   evaluateAudioEnvelopeGain,
   isClipCropped,
@@ -99,6 +100,25 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
     onTabChange?.(next);
   };
   const [, setFaultTick] = useState(0);
+  const inputCommittedRef = useRef<boolean>(false);
+  const sliderCommittedRef = useRef<boolean>(false);
+  const chromaCommittedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    inputCommittedRef.current = false;
+    sliderCommittedRef.current = false;
+    chromaCommittedRef.current = false;
+  }, [selectedClip?.id]);
+
+  const commitInputOnce = () => {
+    if (!inputCommittedRef.current) {
+      onCommitHistory?.();
+      inputCommittedRef.current = true;
+    }
+  };
+  const resetInputCommit = () => {
+    inputCommittedRef.current = false;
+  };
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     title: true,
     timing: true,
@@ -149,11 +169,11 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
     const syncAssetId = gradeTargetAsset?.id || (canGradeClip ? selectedClip?.mediaId : undefined);
 
     return (
-      <div className="w-full lg:w-[296px] shrink-0 flex flex-col bg-[#14171d] border border-[#232832] rounded-lg overflow-hidden">
+      <div className="w-full lg:w-[296px] shrink-0 flex flex-col bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg overflow-hidden shadow-xs dark:shadow-none">
         <PanelTabs tab={tab} onSelect={setTab} hasClip={Boolean(selectedClip)} />
 
         {/* Individual Picture vs Master Timeline Scope Switcher */}
-        <div className="px-3 py-2 border-b border-[#232832] bg-[#101318] flex items-center gap-1 shrink-0">
+        <div className="px-3 py-2 border-b border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#101318] flex items-center gap-1 shrink-0">
           <button
             type="button"
             disabled={!hasIndividualTarget}
@@ -166,7 +186,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
             className={`flex-1 py-1 px-2 rounded text-[11px] font-medium transition-colors whitespace-nowrap truncate disabled:opacity-40 cursor-pointer ${
               effectiveScope === 'picture'
                 ? 'bg-blue-600 text-white'
-                : 'bg-[#171b22] text-slate-400 hover:text-slate-100'
+                : 'bg-slate-200 dark:bg-[#171b22] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
             }`}
           >
             This Picture
@@ -178,7 +198,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
             className={`flex-1 py-1 px-2 rounded text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer ${
               effectiveScope === 'master'
                 ? 'bg-blue-600 text-white'
-                : 'bg-[#171b22] text-slate-400 hover:text-slate-100'
+                : 'bg-slate-200 dark:bg-[#171b22] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
             }`}
           >
             Master (All)
@@ -210,6 +230,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
               bypass={bypassGrade}
               onChange={handleIndividualChange}
               onToggleBypass={onToggleBypassGrade}
+              onCommitHistory={canGradeClip ? onCommitHistory : undefined}
             />
           ) : (
             <ColorGradingPlugin
@@ -220,6 +241,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
               bypass={bypassGrade}
               onChange={onChangeColorGrade}
               onToggleBypass={onToggleBypassGrade}
+              onCommitHistory={onCommitHistory}
             />
           )}
         </div>
@@ -263,22 +285,22 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
       selectedClip.effects.chromaKeyEnabled);
 
   return (
-    <aside className="w-full lg:w-[296px] shrink-0 flex flex-col bg-[#14171d] border border-[#232832] rounded-lg overflow-hidden">
+    <aside className="w-full lg:w-[296px] shrink-0 flex flex-col bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg overflow-hidden shadow-xs dark:shadow-none">
       <PanelTabs tab={tab} onSelect={setTab} hasClip={Boolean(selectedClip)} />
 
       {!selectedClip ? (
         <div className="flex-1 p-5 flex flex-col items-center justify-center text-center space-y-3">
-          <Sliders className="w-5 h-5 text-slate-600" />
+          <Sliders className="w-5 h-5 text-slate-400 dark:text-slate-600" />
           <div>
-            <p className="text-xs font-semibold text-slate-200">Select Any Timeline Clip</p>
-            <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+            <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">Select Any Timeline Clip</p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
               Click a photo, video, title, or song on the timeline below to edit timing, speed, reverse, chroma key, overlays, or transitions.
             </p>
           </div>
           <button
             type="button"
             onClick={() => setTab('grade')}
-            className="px-3.5 py-1.5 rounded bg-[#1d222b] hover:bg-[#262d39] border border-[#2c3340] text-xs font-medium text-slate-200 transition-colors cursor-pointer"
+            className="px-3.5 py-1.5 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#1d222b] dark:hover:bg-[#262d39] border border-slate-300 dark:border-[#2c3340] text-xs font-medium text-slate-800 dark:text-slate-200 transition-colors cursor-pointer"
           >
             Open Color Grading Plug-in
           </button>
@@ -286,11 +308,11 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
       ) : (
         <div className="flex-1 overflow-y-auto p-3.5 space-y-3 text-xs">
           {/* Header + Quick Clip Actions */}
-          <div className="pb-2.5 border-b border-[#232832] space-y-2">
+          <div className="pb-2.5 border-b border-slate-200 dark:border-[#232832] space-y-2">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <p className="font-semibold text-slate-100 truncate">{selectedClip.name}</p>
-                <p className="text-[11px] text-slate-400 font-mono-tabular">
+                <p className="font-semibold text-slate-900 dark:text-slate-100 truncate">{selectedClip.name}</p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono-tabular">
                   {selectedClip.kind} · {selectedClip.startTime.toFixed(2)}s →{' '}
                   {(selectedClip.startTime + selectedClip.duration).toFixed(2)}s
                 </p>
@@ -302,9 +324,9 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                   type="button"
                   onClick={onSplitAtPlayhead}
                   title="Split selected clip at current playhead (S)"
-                  className="flex-1 py-1 px-2 rounded bg-[#1a1f28] hover:bg-[#242b38] border border-[#2a313e] text-[11px] text-slate-200 flex items-center justify-center gap-1 transition-colors"
+                  className="flex-1 py-1 px-2 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#1a1f28] dark:hover:bg-[#242b38] border border-slate-300 dark:border-[#2a313e] text-[11px] text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1 transition-colors cursor-pointer"
                 >
-                  <Scissors className="w-3 h-3 text-blue-400" />
+                  <Scissors className="w-3 h-3 text-blue-500 dark:text-blue-400" />
                   <span>Split</span>
                 </button>
               )}
@@ -313,9 +335,9 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                   type="button"
                   onClick={() => onDuplicateClip(selectedClip.id)}
                   title="Duplicate clip immediately after (Ctrl+D)"
-                  className="flex-1 py-1 px-2 rounded bg-[#1a1f28] hover:bg-[#242b38] border border-[#2a313e] text-[11px] text-slate-200 flex items-center justify-center gap-1 transition-colors"
+                  className="flex-1 py-1 px-2 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#1a1f28] dark:hover:bg-[#242b38] border border-slate-300 dark:border-[#2a313e] text-[11px] text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1 transition-colors cursor-pointer"
                 >
-                  <Copy className="w-3 h-3 text-blue-400" />
+                  <Copy className="w-3 h-3 text-blue-500 dark:text-blue-400" />
                   <span>Duplicate</span>
                 </button>
               )}
@@ -323,7 +345,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                 type="button"
                 onClick={() => onDeleteClip(selectedClip.id)}
                 title="Remove clip from timeline (Delete)"
-                className="py-1 px-2 rounded text-[11px] text-red-400 hover:bg-red-500/15 border border-red-900/40 flex items-center gap-1 transition-colors"
+                className="py-1 px-2 rounded text-[11px] text-red-600 dark:text-red-400 hover:bg-red-500/15 border border-red-300 dark:border-red-900/40 flex items-center gap-1 transition-colors cursor-pointer"
               >
                 <Trash2 className="w-3 h-3" />
                 <span>Remove</span>
@@ -338,11 +360,11 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                 }}
                 className={`w-full py-1 px-2 rounded border text-[11px] font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                   selectedClip.colorGrade?.enabled
-                    ? 'bg-blue-600/20 border-blue-500/60 text-blue-200 hover:bg-blue-600/30'
-                    : 'bg-[#1a1f28] border-[#2a313e] text-slate-300 hover:text-white hover:bg-[#242b38]'
+                    ? 'bg-blue-50 dark:bg-blue-600/20 border-blue-500/60 text-blue-700 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-600/30'
+                    : 'bg-slate-100 dark:bg-[#1a1f28] border-slate-300 dark:border-[#2a313e] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-[#242b38]'
                 }`}
               >
-                <Palette className="w-3 h-3 text-blue-400" />
+                <Palette className="w-3 h-3 text-blue-500 dark:text-blue-400" />
                 <span>
                   {selectedClip.colorGrade?.enabled
                     ? 'Edit Picture Color Grade (Active)'
@@ -362,12 +384,13 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
               <div className="space-y-2.5">
                 <select
                   value={selectedClip.title.template}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    onCommitHistory?.();
                     onUpdateClip(selectedClip.id, {
                       title: { ...selectedClip.title!, template: e.target.value as TitleTemplateId },
-                    })
-                  }
-                  className="w-full h-8 px-2 rounded bg-[#0e1116] border border-[#2a303d] text-slate-100"
+                    });
+                  }}
+                  className="w-full h-8 px-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100"
                 >
                   <option value="main_title">Main Cinema Title</option>
                   <option value="lower_third">Editorial Lower Third</option>
@@ -380,12 +403,14 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                   type="text"
                   value={selectedClip.title.heading}
                   placeholder="Heading"
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    commitInputOnce();
                     onUpdateClip(selectedClip.id, {
                       title: { ...selectedClip.title!, heading: e.target.value },
-                    })
-                  }
-                  className="w-full h-8 px-2 rounded bg-[#0e1116] border border-[#2a303d] text-slate-100"
+                    });
+                  }}
+                  onBlur={resetInputCommit}
+                  className="w-full h-8 px-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100"
                 />
 
                 {selectedClip.title.template !== 'scrolling_credits' &&
@@ -394,12 +419,14 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                       type="text"
                       value={selectedClip.title.subheading}
                       placeholder="Subheading"
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        commitInputOnce();
                         onUpdateClip(selectedClip.id, {
                           title: { ...selectedClip.title!, subheading: e.target.value },
-                        })
-                      }
-                      className="w-full h-8 px-2 rounded bg-[#0e1116] border border-[#2a303d] text-slate-100"
+                        });
+                      }}
+                      onBlur={resetInputCommit}
+                      className="w-full h-8 px-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100"
                     />
                   )}
 
@@ -408,12 +435,14 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                     rows={4}
                     value={selectedClip.title.bodyText}
                     placeholder="Role :: Name (one per line)"
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      commitInputOnce();
                       onUpdateClip(selectedClip.id, {
                         title: { ...selectedClip.title!, bodyText: e.target.value },
-                      })
-                    }
-                    className="w-full p-2 rounded bg-[#0e1116] border border-[#2a303d] text-slate-100 font-mono-tabular text-[11px]"
+                      });
+                    }}
+                    onBlur={resetInputCommit}
+                    className="w-full p-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 font-mono-tabular text-[11px]"
                   />
                 )}
 
@@ -434,34 +463,38 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
           >
             <div className="space-y-2.5">
               <div className="grid grid-cols-2 gap-2">
-                <label className="flex flex-col gap-1 text-[11px] text-slate-400">
+                <label className="flex flex-col gap-1 text-[11px] text-slate-500 dark:text-slate-400">
                   <span>Clip Duration (s)</span>
                   <input
                     type="number"
                     min={0.2}
                     step={0.1}
                     value={selectedClip.duration}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      commitInputOnce();
                       onUpdateClip(selectedClip.id, {
                         duration: Math.max(0.2, Number(e.target.value) || 0.2),
-                      })
-                    }
-                    className="h-7 px-2 rounded bg-[#0e1116] border border-[#2a303d] text-slate-100 font-mono-tabular"
+                      });
+                    }}
+                    onBlur={resetInputCommit}
+                    className="h-7 px-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 font-mono-tabular"
                   />
                 </label>
-                <label className="flex flex-col gap-1 text-[11px] text-slate-400">
+                <label className="flex flex-col gap-1 text-[11px] text-slate-500 dark:text-slate-400">
                   <span>Start Offset (s)</span>
                   <input
                     type="number"
                     min={0}
                     step={0.1}
                     value={selectedClip.trimStart}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      commitInputOnce();
                       onUpdateClip(selectedClip.id, {
                         trimStart: Math.max(0, Number(e.target.value) || 0),
-                      })
-                    }
-                    className="h-7 px-2 rounded bg-[#0e1116] border border-[#2a303d] text-slate-100 font-mono-tabular"
+                      });
+                    }}
+                    onBlur={resetInputCommit}
+                    className="h-7 px-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 font-mono-tabular"
                   />
                 </label>
               </div>
@@ -469,8 +502,8 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
               {(selectedClip.kind === 'video' || selectedClip.kind === 'audio') && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-slate-400">Speed Presets</span>
-                    <span className="font-mono-tabular text-slate-200">
+                    <span className="text-slate-500 dark:text-slate-400">Speed Presets</span>
+                    <span className="font-mono-tabular text-slate-800 dark:text-slate-200">
                       {selectedClip.speed.toFixed(2)}×
                     </span>
                   </div>
@@ -483,10 +516,10 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                           onCommitHistory?.();
                           onUpdateClip(selectedClip.id, { speed: sp });
                         }}
-                        className={`py-1 rounded text-[10px] font-mono-tabular border transition-colors ${
+                        className={`py-1 rounded text-[10px] font-mono-tabular border transition-colors cursor-pointer ${
                           Math.abs(selectedClip.speed - sp) < 0.03
-                            ? 'bg-blue-600/25 border-blue-500 text-blue-100'
-                            : 'bg-[#101318] border-[#262c38] text-slate-300 hover:text-white'
+                            ? 'bg-blue-50 dark:bg-blue-600/25 border-blue-500 text-blue-700 dark:text-blue-100'
+                            : 'bg-slate-50 dark:bg-[#101318] border-slate-300 dark:border-[#262c38] text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                         }`}
                       >
                         {sp}×
@@ -499,12 +532,25 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                     max={4.0}
                     step={0.05}
                     value={selectedClip.speed}
-                    onChange={(e) =>
-                      onUpdateClip(selectedClip.id, { speed: Number(e.target.value) })
-                    }
+                    onChange={(e) => {
+                      if (!sliderCommittedRef.current) {
+                        onCommitHistory?.();
+                        sliderCommittedRef.current = true;
+                      }
+                      onUpdateClip(selectedClip.id, { speed: Number(e.target.value) });
+                    }}
+                    onPointerUp={() => {
+                      sliderCommittedRef.current = false;
+                    }}
+                    onPointerCancel={() => {
+                      sliderCommittedRef.current = false;
+                    }}
+                    onBlur={() => {
+                      sliderCommittedRef.current = false;
+                    }}
                     className="studio-slider w-full"
                   />
-                  <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+                  <label className="flex items-center gap-2 text-slate-700 dark:text-slate-300 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={selectedClip.reverse}
@@ -512,7 +558,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                         onCommitHistory?.();
                         onUpdateClip(selectedClip.id, { reverse: e.target.checked });
                       }}
-                      className="rounded border-[#2a303d] bg-[#0e1116]"
+                      className="rounded border-slate-300 dark:border-[#2a303d] bg-white dark:bg-[#0e1116]"
                     />
                     <span>Play Backwards (Reverse)</span>
                   </label>
@@ -520,7 +566,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
               )}
 
               <div className="grid grid-cols-2 gap-2">
-                <label className="flex flex-col gap-1 text-[11px] text-slate-400">
+                <label className="flex flex-col gap-1 text-[11px] text-slate-500 dark:text-slate-400">
                   <span>Fade In (s)</span>
                   <input
                     type="number"
@@ -528,13 +574,15 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                     max={5}
                     step={0.1}
                     value={selectedClip.fadeIn}
-                    onChange={(e) =>
-                      onUpdateClip(selectedClip.id, { fadeIn: Math.max(0, Number(e.target.value) || 0) })
-                    }
-                    className="h-7 px-2 rounded bg-[#0e1116] border border-[#2a303d] text-slate-100 font-mono-tabular"
+                    onChange={(e) => {
+                      commitInputOnce();
+                      onUpdateClip(selectedClip.id, { fadeIn: Math.max(0, Number(e.target.value) || 0) });
+                    }}
+                    onBlur={resetInputCommit}
+                    className="h-7 px-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 font-mono-tabular"
                   />
                 </label>
-                <label className="flex flex-col gap-1 text-[11px] text-slate-400">
+                <label className="flex flex-col gap-1 text-[11px] text-slate-500 dark:text-slate-400">
                   <span>Fade Out (s)</span>
                   <input
                     type="number"
@@ -542,10 +590,12 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                     max={5}
                     step={0.1}
                     value={selectedClip.fadeOut}
-                    onChange={(e) =>
-                      onUpdateClip(selectedClip.id, { fadeOut: Math.max(0, Number(e.target.value) || 0) })
-                    }
-                    className="h-7 px-2 rounded bg-[#0e1116] border border-[#2a303d] text-slate-100 font-mono-tabular"
+                    onChange={(e) => {
+                      commitInputOnce();
+                      onUpdateClip(selectedClip.id, { fadeOut: Math.max(0, Number(e.target.value) || 0) });
+                    }}
+                    onBlur={resetInputCommit}
+                    className="h-7 px-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 font-mono-tabular"
                   />
                 </label>
               </div>
@@ -560,7 +610,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
               onToggle={() => toggleSection('transition')}
             >
               <div className="space-y-2">
-                <label htmlFor="clip-transitions-select" className="flex flex-col gap-1 text-[11px] text-slate-400">
+                <label htmlFor="clip-transitions-select" className="flex flex-col gap-1 text-[11px] text-slate-500 dark:text-slate-400">
                   <span>Transitions</span>
                   <select
                     id="clip-transitions-select"
@@ -585,7 +635,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                         },
                       });
                     }}
-                    className="w-full h-8 px-2 rounded bg-[#0e1116] border border-[#2a303d] text-slate-100 text-[11px]"
+                    className="w-full h-8 px-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 text-[11px]"
                   >
                     {TRANSITION_GROUPS.map((groupName) => (
                       <optgroup key={groupName} label={groupName}>
@@ -606,6 +656,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                     min={0.1}
                     max={1.8}
                     step={0.05}
+                    onCommitHistory={onCommitHistory}
                     onChange={(v) =>
                       onUpdateClip(selectedClip.id, {
                         transitionDuration: v,
@@ -641,9 +692,9 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                     <button
                       type="button"
                       onClick={onSplitAtPlayhead}
-                      className="px-2 py-1.5 rounded bg-[#1a212d] hover:bg-blue-600/30 border border-[#2c3442] text-[10px] font-medium text-slate-200 flex items-center justify-center gap-1 cursor-pointer"
+                      className="px-2 py-1.5 rounded bg-slate-100 hover:bg-blue-50 dark:bg-[#1a212d] dark:hover:bg-blue-600/30 border border-slate-300 dark:border-[#2c3442] text-[10px] font-medium text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1 cursor-pointer"
                     >
-                      <Scissors className="w-3 h-3 text-blue-400" />
+                      <Scissors className="w-3 h-3 text-blue-500 dark:text-blue-400" />
                       <span>Cut @ Playhead</span>
                     </button>
                   )}
@@ -651,9 +702,9 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                     <button
                       type="button"
                       onClick={() => onDuplicateClip(selectedClip.id)}
-                      className="px-2 py-1.5 rounded bg-[#1a212d] hover:bg-emerald-600/30 border border-[#2c3442] text-[10px] font-medium text-slate-200 flex items-center justify-center gap-1 cursor-pointer"
+                      className="px-2 py-1.5 rounded bg-slate-100 hover:bg-emerald-50 dark:bg-[#1a212d] dark:hover:bg-emerald-600/30 border border-slate-300 dark:border-[#2c3442] text-[10px] font-medium text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1 cursor-pointer"
                     >
-                      <Copy className="w-3 h-3 text-emerald-400" />
+                      <Copy className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                       <span>Loop / Repeat</span>
                     </button>
                   )}
@@ -661,7 +712,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
 
                 {/* Background Music (BGM) Presets & Auto-Ducking */}
                 <div>
-                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block mb-1">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 font-semibold block mb-1">
                     Background Music Level Presets
                   </span>
                   <div className="grid grid-cols-4 gap-1">
@@ -680,8 +731,8 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                         }}
                         className={`px-1 py-1 rounded text-[10px] font-medium border cursor-pointer ${
                           Math.abs((selectedClip.volume ?? 1) - preset.v) < 0.03
-                            ? 'bg-emerald-600/25 border-emerald-400 text-emerald-100'
-                            : 'bg-[#101319] border-[#262c38] text-slate-300 hover:border-slate-500'
+                            ? 'bg-emerald-50 dark:bg-emerald-600/25 border-emerald-500 text-emerald-700 dark:text-emerald-100'
+                            : 'bg-slate-50 dark:bg-[#101319] border-slate-300 dark:border-[#262c38] text-slate-600 dark:text-slate-300 hover:border-slate-400 dark:hover:border-slate-500'
                         }`}
                       >
                         {preset.label}
@@ -691,15 +742,18 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                 </div>
 
                 <div className="flex items-center justify-between gap-2">
-                  <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer">
+                  <label className="flex items-center gap-2 text-[11px] text-slate-700 dark:text-slate-300 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={selectedClip.muted}
-                      onChange={(e) => onUpdateClip(selectedClip.id, { muted: e.target.checked })}
+                      onChange={(e) => {
+                        onCommitHistory?.();
+                        onUpdateClip(selectedClip.id, { muted: e.target.checked });
+                      }}
                     />
                     <span>Mute Clip</span>
                   </label>
-                  <label className="flex items-center gap-1.5 text-[11px] text-emerald-200 cursor-pointer">
+                  <label className="flex items-center gap-1.5 text-[11px] text-emerald-700 dark:text-emerald-200 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={Boolean(selectedClip.backgroundDucking)}
@@ -723,6 +777,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                     min={0.1}
                     max={0.8}
                     step={0.05}
+                    onCommitHistory={onCommitHistory}
                     onChange={(v) => onUpdateClip(selectedClip.id, { duckLevel: v })}
                   />
                 )}
@@ -734,11 +789,27 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                   min={0}
                   max={2}
                   step={0.05}
+                  onCommitHistory={onCommitHistory}
                   onChange={(v) => onUpdateClip(selectedClip.id, { volume: v })}
                 />
 
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onCommitHistory?.();
+                      const normVol = computeClipNormalizeGain(selectedClip.waveform, 0.84);
+                      onUpdateClip(selectedClip.id, { volume: normVol });
+                    }}
+                    className="flex-1 py-1.5 px-2.5 rounded bg-blue-50 hover:bg-blue-100 dark:bg-[#141d29] dark:hover:bg-blue-600/25 border border-blue-300 dark:border-blue-500/40 text-[10px] font-medium text-blue-700 dark:text-blue-200 cursor-pointer transition-colors"
+                    title="Analyze clip waveform peaks and normalize Base Volume toward -1.5 dBFS headroom"
+                  >
+                    Auto-Normalize Clip Level (-1.5 dB Peak)
+                  </button>
+                </div>
+
                 {/* Interactive Waveform + Incremental Volume Envelope Graph */}
-                <div className="p-2 rounded bg-[#0c1016] border border-[#232935] space-y-2">
+                <div className="p-2 rounded bg-slate-900 dark:bg-[#0c1016] border border-slate-700 dark:border-[#232935] space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
                       Waveform Volume Curve
@@ -901,7 +972,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                           ],
                         });
                       }}
-                      className="px-1.5 py-1 rounded bg-[#141a24] hover:bg-[#1e2736] border border-[#293242] text-[10px] text-slate-200 cursor-pointer"
+                      className="px-1.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-[10px] text-slate-200 cursor-pointer"
                     >
                       ↗ Ramp Up (Swell)
                     </button>
@@ -917,7 +988,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                           ],
                         });
                       }}
-                      className="px-1.5 py-1 rounded bg-[#141a24] hover:bg-[#1e2736] border border-[#293242] text-[10px] text-slate-200 cursor-pointer"
+                      className="px-1.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-[10px] text-slate-200 cursor-pointer"
                     >
                       ↘ Ramp Down (Outro)
                     </button>
@@ -934,7 +1005,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                           ],
                         });
                       }}
-                      className="px-1.5 py-1 rounded bg-[#141a24] hover:bg-[#1e2736] border border-[#293242] text-[10px] text-slate-200 cursor-pointer"
+                      className="px-1.5 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-[10px] text-slate-200 cursor-pointer"
                     >
                       ∿ Mid Dialogue Dip
                     </button>
@@ -944,7 +1015,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                         onCommitHistory?.();
                         onUpdateClip(selectedClip.id, { volumeEnvelope: [] });
                       }}
-                      className="px-1.5 py-1 rounded bg-[#141a24] hover:bg-red-900/30 border border-[#293242] text-[10px] text-slate-400 hover:text-red-300 cursor-pointer"
+                      className="px-1.5 py-1 rounded bg-slate-800 hover:bg-red-900/40 border border-slate-600 text-[10px] text-slate-300 hover:text-red-300 cursor-pointer"
                     >
                       Clear Curve
                     </button>
@@ -954,13 +1025,14 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                 {/* Fade Curves & Audio Transitions */}
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[10px] text-slate-400 block mb-1">Fade Curve Shape</label>
+                    <label className="text-[10px] text-slate-500 dark:text-slate-400 block mb-1">Fade Curve Shape</label>
                     <select
                       value={selectedClip.audioFadeCurve || 'scurve'}
-                      onChange={(e) =>
-                        onUpdateClip(selectedClip.id, { audioFadeCurve: e.target.value as AudioFadeCurve })
-                      }
-                      className="w-full h-7 px-1.5 rounded bg-[#0e1116] border border-[#262c38] text-[11px] text-slate-100"
+                      onChange={(e) => {
+                        onCommitHistory?.();
+                        onUpdateClip(selectedClip.id, { audioFadeCurve: e.target.value as AudioFadeCurve });
+                      }}
+                      className="w-full h-7 px-1.5 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#262c38] text-[11px] text-slate-900 dark:text-slate-100"
                     >
                       <option value="scurve">S-Curve (Smooth)</option>
                       <option value="linear">Linear Ramp</option>
@@ -969,22 +1041,26 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                     </select>
                   </div>
                   <div>
-                    <label className="text-[10px] text-slate-400 block mb-1">Music Transition Out</label>
+                    <label className="text-[10px] text-slate-500 dark:text-slate-400 block mb-1">Music Transition Out</label>
                     <select
                       value={selectedClip.audioTransitionOut || 'cut'}
                       onChange={(e) => {
+                        onCommitHistory?.();
                         const t = e.target.value as AudioTransitionType;
                         onUpdateClip(selectedClip.id, {
                           audioTransitionOut: t,
+                          audioCrossfadeCurve:
+                            t === 'crossfade_lin' ? 'linear' : t === 'crossfade_exp' ? 'exp' : 'scurve',
                           audioTransitionDuration:
                             t === 'cut' ? 0 : Math.max(0.4, selectedClip.audioTransitionDuration || 1.2),
                         });
                       }}
-                      className="w-full h-7 px-1.5 rounded bg-[#0e1116] border border-[#262c38] text-[11px] text-slate-100"
+                      className="w-full h-7 px-1.5 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#262c38] text-[11px] text-slate-900 dark:text-slate-100"
                     >
                       <option value="cut">Hard Cut</option>
-                      <option value="crossfade_eq">Crossfade (Equal Power)</option>
+                      <option value="crossfade_eq">Crossfade (S-Curve)</option>
                       <option value="crossfade_lin">Crossfade (Linear)</option>
+                      <option value="crossfade_exp">Crossfade (Exponential)</option>
                       <option value="dip_swell">Dip &amp; Swell</option>
                     </select>
                   </div>
@@ -998,6 +1074,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                     min={0.2}
                     max={4.0}
                     step={0.1}
+                    onCommitHistory={onCommitHistory}
                     onChange={(v) => onUpdateClip(selectedClip.id, { audioTransitionDuration: v })}
                   />
                 )}
@@ -1009,6 +1086,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                   min={0}
                   max={Math.max(0.5, Number((selectedClip.duration * 0.48).toFixed(2)))}
                   step={0.05}
+                  onCommitHistory={onCommitHistory}
                   onChange={(v) => onUpdateClip(selectedClip.id, { fadeIn: v })}
                 />
                 <FxSlider
@@ -1018,6 +1096,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                   min={0}
                   max={Math.max(0.5, Number((selectedClip.duration * 0.48).toFixed(2)))}
                   step={0.05}
+                  onCommitHistory={onCommitHistory}
                   onChange={(v) => onUpdateClip(selectedClip.id, { fadeOut: v })}
                 />
 
@@ -1034,6 +1113,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                   min={-1}
                   max={1}
                   step={0.05}
+                  onCommitHistory={onCommitHistory}
                   onChange={(v) => onUpdateClip(selectedClip.id, { pan: v })}
                 />
               </div>
@@ -1062,7 +1142,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                         opacity: 1,
                       });
                     }}
-                    className="text-[11px] text-slate-400 hover:text-white cursor-pointer"
+                    className="text-[11px] text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
                   >
                     Reset
                   </button>
@@ -1070,14 +1150,14 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
               >
                 <div className="space-y-2.5">
                   {onCanvasToolChange && (
-                    <div className="flex items-center gap-1 p-0.5 rounded bg-[#0e1116] border border-[#232832]">
+                    <div className="flex items-center gap-1 p-0.5 rounded bg-slate-100 dark:bg-[#0e1116] border border-slate-200 dark:border-[#232832]">
                       <button
                         type="button"
                         onClick={() => onCanvasToolChange('resize')}
                         className={`flex-1 py-1 px-2 rounded text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer ${
                           canvasTool === 'resize'
                             ? 'bg-blue-600 text-white'
-                            : 'text-slate-400 hover:text-slate-100'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
                         }`}
                       >
                         <Move className="w-3 h-3" />
@@ -1089,7 +1169,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                         className={`flex-1 py-1 px-2 rounded text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer ${
                           canvasTool === 'crop'
                             ? 'bg-amber-600 text-white'
-                            : 'text-slate-400 hover:text-slate-100'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
                         }`}
                       >
                         <Crop className="w-3 h-3" />
@@ -1101,11 +1181,11 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                   <div className="space-y-1">
                     <span className="text-[10px] text-slate-500">Quick Watermark / PiP Corner Presets</span>
                     <div className="grid grid-cols-5 gap-1">
-                      <button type="button" onClick={() => applyCornerPreset(-34, -34)} title="Top Left corner" className="py-1 rounded bg-[#1c212b] hover:bg-[#272e3b] text-[10px] cursor-pointer">TL</button>
-                      <button type="button" onClick={() => applyCornerPreset(34, -34)} title="Top Right corner" className="py-1 rounded bg-[#1c212b] hover:bg-[#272e3b] text-[10px] cursor-pointer">TR</button>
-                      <button type="button" onClick={() => applyCornerPreset(-34, 34)} title="Bottom Left corner" className="py-1 rounded bg-[#1c212b] hover:bg-[#272e3b] text-[10px] cursor-pointer">BL</button>
-                      <button type="button" onClick={() => applyCornerPreset(34, 34)} title="Bottom Right corner" className="py-1 rounded bg-[#1c212b] hover:bg-[#272e3b] text-[10px] cursor-pointer">BR</button>
-                      <button type="button" onClick={() => { onCommitHistory?.(); onUpdateClip(selectedClip.id, { x: 0, y: 0, scale: 1, scaleX: 1, scaleY: 1, fit: 'cover' }); }} title="Full frame center" className="py-1 rounded bg-[#1c212b] hover:bg-[#272e3b] text-[10px] cursor-pointer">Full</button>
+                      <button type="button" onClick={() => applyCornerPreset(-34, -34)} title="Top Left corner" className="py-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#1c212b] dark:hover:bg-[#272e3b] text-slate-800 dark:text-slate-200 text-[10px] cursor-pointer">TL</button>
+                      <button type="button" onClick={() => applyCornerPreset(34, -34)} title="Top Right corner" className="py-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#1c212b] dark:hover:bg-[#272e3b] text-slate-800 dark:text-slate-200 text-[10px] cursor-pointer">TR</button>
+                      <button type="button" onClick={() => applyCornerPreset(-34, 34)} title="Bottom Left corner" className="py-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#1c212b] dark:hover:bg-[#272e3b] text-slate-800 dark:text-slate-200 text-[10px] cursor-pointer">BL</button>
+                      <button type="button" onClick={() => applyCornerPreset(34, 34)} title="Bottom Right corner" className="py-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#1c212b] dark:hover:bg-[#272e3b] text-slate-800 dark:text-slate-200 text-[10px] cursor-pointer">BR</button>
+                      <button type="button" onClick={() => { onCommitHistory?.(); onUpdateClip(selectedClip.id, { x: 0, y: 0, scale: 1, scaleX: 1, scaleY: 1, fit: 'cover' }); }} title="Full frame center" className="py-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#1c212b] dark:hover:bg-[#272e3b] text-slate-800 dark:text-slate-200 text-[10px] cursor-pointer">Full</button>
                     </div>
                   </div>
 
@@ -1116,6 +1196,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                     min={0.1}
                     max={3.0}
                     step={0.02}
+                    onCommitHistory={onCommitHistory}
                     onChange={(v) => onUpdateClip(selectedClip.id, { scale: v })}
                   />
                   <div className="grid grid-cols-2 gap-2">
@@ -1126,6 +1207,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                       min={0.15}
                       max={3.0}
                       step={0.02}
+                      onCommitHistory={onCommitHistory}
                       onChange={(v) => onUpdateClip(selectedClip.id, { scaleX: v })}
                     />
                     <FxSlider
@@ -1135,6 +1217,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                       min={0.15}
                       max={3.0}
                       step={0.02}
+                      onCommitHistory={onCommitHistory}
                       onChange={(v) => onUpdateClip(selectedClip.id, { scaleY: v })}
                     />
                   </div>
@@ -1145,7 +1228,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                         onCommitHistory?.();
                         onUpdateClip(selectedClip.id, { scaleX: 1, scaleY: 1 });
                       }}
-                      className="w-full py-1 rounded bg-[#1a1f28] hover:bg-[#242b38] border border-[#2a313e] text-[10px] text-slate-300 cursor-pointer"
+                      className="w-full py-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#1a1f28] dark:hover:bg-[#242b38] border border-slate-300 dark:border-[#2a313e] text-[10px] text-slate-700 dark:text-slate-300 cursor-pointer"
                     >
                       Restore 1:1 Proportions
                     </button>
@@ -1159,6 +1242,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                       min={-80}
                       max={80}
                       step={1}
+                      onCommitHistory={onCommitHistory}
                       onChange={(v) => onUpdateClip(selectedClip.id, { x: v })}
                     />
                     <FxSlider
@@ -1168,6 +1252,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                       min={-80}
                       max={80}
                       step={1}
+                      onCommitHistory={onCommitHistory}
                       onChange={(v) => onUpdateClip(selectedClip.id, { y: v })}
                     />
                   </div>
@@ -1178,6 +1263,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                     min={-180}
                     max={180}
                     step={1}
+                    onCommitHistory={onCommitHistory}
                     onChange={(v) => onUpdateClip(selectedClip.id, { rotation: v })}
                   />
                   <FxSlider
@@ -1187,6 +1273,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                     min={0}
                     max={1}
                     step={0.02}
+                    onCommitHistory={onCommitHistory}
                     onChange={(v) => onUpdateClip(selectedClip.id, { opacity: v })}
                   />
 
@@ -1195,10 +1282,11 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                       {selectedClip.kind === 'image' && (
                         <select
                           value={selectedClip.motion}
-                          onChange={(e) =>
-                            onUpdateClip(selectedClip.id, { motion: e.target.value as MotionType })
-                          }
-                          className="h-7 px-1.5 rounded bg-[#0e1116] border border-[#2a303d] text-slate-200 text-[11px]"
+                          onChange={(e) => {
+                            onCommitHistory?.();
+                            onUpdateClip(selectedClip.id, { motion: e.target.value as MotionType });
+                          }}
+                          className="h-7 px-1.5 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-200 text-[11px]"
                         >
                           <option value="none">Motion: Static</option>
                           <option value="zoomIn">Zoom In</option>
@@ -1209,10 +1297,11 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                       )}
                       <select
                         value={selectedClip.fit}
-                        onChange={(e) =>
-                          onUpdateClip(selectedClip.id, { fit: e.target.value as 'cover' | 'contain' })
-                        }
-                        className="h-7 px-1.5 rounded bg-[#0e1116] border border-[#2a303d] text-slate-200 text-[11px]"
+                        onChange={(e) => {
+                          onCommitHistory?.();
+                          onUpdateClip(selectedClip.id, { fit: e.target.value as 'cover' | 'contain' });
+                        }}
+                        className="h-7 px-1.5 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-200 text-[11px]"
                       >
                         <option value="cover">Fill Frame</option>
                         <option value="contain">Fit Whole</option>
@@ -1235,7 +1324,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                         onCommitHistory?.();
                         onUpdateClip(selectedClip.id, { crop: { ...DEFAULT_CLIP_CROP } });
                       }}
-                      className="text-[11px] text-amber-300 hover:text-white cursor-pointer"
+                      className="text-[11px] text-amber-600 dark:text-amber-300 hover:text-slate-900 dark:hover:text-white cursor-pointer"
                     >
                       Uncrop
                     </button>
@@ -1246,7 +1335,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-[10px] text-slate-500">
                       <span>Aspect Crop Presets</span>
-                      <span className="font-mono-tabular text-slate-400">
+                      <span className="font-mono-tabular text-slate-500 dark:text-slate-400">
                         Visible {Math.round((1 - activeCrop.left - activeCrop.right) * 100)}% ×{' '}
                         {Math.round((1 - activeCrop.top - activeCrop.bottom) * 100)}%
                       </span>
@@ -1261,7 +1350,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                         className={`py-1 rounded text-[10px] cursor-pointer ${
                           !clipIsCropped
                             ? 'bg-blue-600 text-white'
-                            : 'bg-[#1c212b] hover:bg-[#272e3b] text-slate-200'
+                            : 'bg-slate-100 hover:bg-slate-200 dark:bg-[#1c212b] dark:hover:bg-[#272e3b] text-slate-800 dark:text-slate-200'
                         }`}
                       >
                         Full
@@ -1286,7 +1375,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                             );
                             onUpdateClip(selectedClip.id, { crop: nextCrop });
                           }}
-                          className="py-1 rounded bg-[#1c212b] hover:bg-[#272e3b] text-[10px] text-slate-200 cursor-pointer"
+                          className="py-1 rounded bg-slate-100 hover:bg-slate-200 dark:bg-[#1c212b] dark:hover:bg-[#272e3b] text-[10px] text-slate-800 dark:text-slate-200 cursor-pointer"
                         >
                           {label}
                         </button>
@@ -1302,6 +1391,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                       min={0}
                       max={0.85}
                       step={0.01}
+                      onCommitHistory={onCommitHistory}
                       onChange={(v) => updateCrop({ top: v })}
                     />
                     <FxSlider
@@ -1311,6 +1401,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                       min={0}
                       max={0.85}
                       step={0.01}
+                      onCommitHistory={onCommitHistory}
                       onChange={(v) => updateCrop({ bottom: v })}
                     />
                     <FxSlider
@@ -1320,6 +1411,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                       min={0}
                       max={0.85}
                       step={0.01}
+                      onCommitHistory={onCommitHistory}
                       onChange={(v) => updateCrop({ left: v })}
                     />
                     <FxSlider
@@ -1329,6 +1421,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                       min={0}
                       max={0.85}
                       step={0.01}
+                      onCommitHistory={onCommitHistory}
                       onChange={(v) => updateCrop({ right: v })}
                     />
                   </div>
@@ -1343,8 +1436,11 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                 rightAction={
                   <button
                     type="button"
-                    onClick={() => updateFx({ ...DEFAULT_CLIP_EFFECTS })}
-                    className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1"
+                    onClick={() => {
+                      onCommitHistory?.();
+                      updateFx({ ...DEFAULT_CLIP_EFFECTS });
+                    }}
+                    className="text-[11px] text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1 cursor-pointer"
                   >
                     <RotateCcw className="w-3 h-3" />
                     <span>Reset</span>
@@ -1353,7 +1449,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
               >
                 <div className="space-y-2.5">
                   {fxFault && (
-                    <div className="p-2 rounded bg-amber-950/50 border border-amber-700/60 text-[11px] text-amber-200 flex items-center justify-between gap-2">
+                    <div className="p-2 rounded bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700/60 text-[11px] text-amber-800 dark:text-amber-200 flex items-center justify-between gap-2">
                       <span className="truncate">FX plugin quarantined: {fxFault}</span>
                       <button
                         type="button"
@@ -1375,6 +1471,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                     min={-0.45}
                     max={0.45}
                     step={0.02}
+                    onCommitHistory={onCommitHistory}
                     onChange={(v) => updateFx({ brightness: v })}
                   />
                   <FxSlider
@@ -1384,6 +1481,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                     min={0.5}
                     max={1.8}
                     step={0.02}
+                    onCommitHistory={onCommitHistory}
                     onChange={(v) => updateFx({ gamma: v })}
                   />
                   <FxSlider
@@ -1393,54 +1491,76 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                     min={-180}
                     max={180}
                     step={2}
+                    onCommitHistory={onCommitHistory}
                     onChange={(v) => updateFx({ hue: v })}
                   />
 
-                  <label className="flex items-center gap-2 text-slate-300 cursor-pointer pt-1">
+                  <label className="flex items-center gap-2 text-slate-700 dark:text-slate-300 cursor-pointer pt-1">
                     <input
                       type="checkbox"
                       checked={selectedClip.effects.greyscale}
-                      onChange={(e) => updateFx({ greyscale: e.target.checked })}
+                      onChange={(e) => {
+                        onCommitHistory?.();
+                        updateFx({ greyscale: e.target.checked });
+                      }}
                     />
                     <span>Black & White (Greyscale)</span>
                   </label>
 
                   {/* Chroma Key (Green / Blue Screen) */}
-                  <div className="p-2.5 rounded bg-[#0e1116] border border-[#242a36] space-y-2">
-                    <label className="flex items-center justify-between text-slate-200 cursor-pointer">
+                  <div className="p-2.5 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-200 dark:border-[#242a36] space-y-2">
+                    <label className="flex items-center justify-between text-slate-800 dark:text-slate-200 cursor-pointer">
                       <span className="font-medium flex items-center gap-1.5">
-                        <Wand2 className="w-3 h-3 text-emerald-400" />
+                        <Wand2 className="w-3 h-3 text-emerald-500 dark:text-emerald-400" />
                         Remove Background (Chroma Key)
                       </span>
                       <input
                         type="checkbox"
                         checked={selectedClip.effects.chromaKeyEnabled}
-                        onChange={(e) => updateFx({ chromaKeyEnabled: e.target.checked })}
+                        onChange={(e) => {
+                          onCommitHistory?.();
+                          updateFx({ chromaKeyEnabled: e.target.checked });
+                        }}
                       />
                     </label>
 
                     {selectedClip.effects.chromaKeyEnabled && (
                       <div className="space-y-2 pt-1">
                         <div className="flex items-center justify-between gap-2">
-                          <span className="text-[11px] text-slate-400">Screen Color</span>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400">Screen Color</span>
                           <div className="flex items-center gap-1">
                             <button
                               type="button"
-                              onClick={() => updateFx({ chromaKeyColor: '#00ff00' })}
-                              className="w-5 h-5 rounded bg-[#00ff00] border border-white/30"
+                              onClick={() => {
+                                onCommitHistory?.();
+                                updateFx({ chromaKeyColor: '#00ff00' });
+                              }}
+                              className="w-5 h-5 rounded bg-[#00ff00] border border-slate-400 dark:border-white/30"
                               title="Green Screen"
                             />
                             <button
                               type="button"
-                              onClick={() => updateFx({ chromaKeyColor: '#0000ff' })}
-                              className="w-5 h-5 rounded bg-[#0000ff] border border-white/30"
+                              onClick={() => {
+                                onCommitHistory?.();
+                                updateFx({ chromaKeyColor: '#0000ff' });
+                              }}
+                              className="w-5 h-5 rounded bg-[#0000ff] border border-slate-400 dark:border-white/30"
                               title="Blue Screen"
                             />
                             <input
                               type="color"
                               value={selectedClip.effects.chromaKeyColor}
-                              onChange={(e) => updateFx({ chromaKeyColor: e.target.value })}
-                              className="w-7 h-5 rounded bg-transparent border border-[#2a303d]"
+                              onChange={(e) => {
+                                if (!chromaCommittedRef.current) {
+                                  onCommitHistory?.();
+                                  chromaCommittedRef.current = true;
+                                }
+                                updateFx({ chromaKeyColor: e.target.value });
+                              }}
+                              onBlur={() => {
+                                chromaCommittedRef.current = false;
+                              }}
+                              className="w-7 h-5 rounded bg-transparent border border-slate-300 dark:border-[#2a303d]"
                             />
                           </div>
                         </div>
@@ -1451,6 +1571,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                           min={0.03}
                           max={0.5}
                           step={0.01}
+                          onCommitHistory={onCommitHistory}
                           onChange={(v) => updateFx({ chromaKeySimilarity: v })}
                         />
                         <FxSlider
@@ -1460,6 +1581,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
                           min={0}
                           max={0.3}
                           step={0.01}
+                          onCommitHistory={onCommitHistory}
                           onChange={(v) => updateFx({ chromaKeyBlend: v })}
                         />
                       </div>
@@ -1480,14 +1602,14 @@ const PanelTabs: React.FC<{
   onSelect: (t: 'clip' | 'grade') => void;
   hasClip: boolean;
 }> = ({ tab, onSelect, hasClip }) => (
-  <div className="flex border-b border-[#232832] bg-[#171b22] shrink-0">
+  <div className="flex border-b border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#171b22] shrink-0">
     <button
       type="button"
       onClick={() => onSelect('clip')}
-      className={`flex-1 py-2 text-xs font-semibold transition-colors whitespace-nowrap ${
+      className={`flex-1 py-2 text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
         tab === 'clip'
-          ? 'text-white border-b-2 border-blue-500 bg-[#14171d]'
-          : 'text-slate-400 hover:text-slate-200'
+          ? 'text-slate-900 dark:text-white border-b-2 border-blue-500 bg-white dark:bg-[#14171d]'
+          : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
       }`}
     >
       {hasClip ? 'Clip Inspector' : 'Clip & FX'}
@@ -1495,10 +1617,10 @@ const PanelTabs: React.FC<{
     <button
       type="button"
       onClick={() => onSelect('grade')}
-      className={`flex-1 py-2 text-xs font-semibold transition-colors whitespace-nowrap ${
+      className={`flex-1 py-2 text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
         tab === 'grade'
-          ? 'text-white border-b-2 border-blue-500 bg-[#14171d]'
-          : 'text-slate-400 hover:text-slate-200'
+          ? 'text-slate-900 dark:text-white border-b-2 border-blue-500 bg-white dark:bg-[#14171d]'
+          : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
       }`}
     >
       Color Plug-in
@@ -1513,17 +1635,17 @@ const CollapsibleSection: React.FC<{
   rightAction?: React.ReactNode;
   children: React.ReactNode;
 }> = ({ title, open, onToggle, rightAction, children }) => (
-  <div className="pb-3 border-b border-[#232832] last:border-b-0 last:pb-0">
+  <div className="pb-3 border-b border-slate-200 dark:border-[#232832] last:border-b-0 last:pb-0">
     <div className="flex items-center justify-between gap-2 mb-2">
       <button
         type="button"
         onClick={onToggle}
-        className="flex items-center gap-1 text-left font-semibold text-slate-200 hover:text-white transition-colors cursor-pointer"
+        className="flex items-center gap-1 text-left font-semibold text-slate-800 dark:text-slate-200 hover:text-slate-950 dark:hover:text-white transition-colors cursor-pointer"
       >
         {open ? (
-          <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          <ChevronDown className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 shrink-0" />
         ) : (
-          <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          <ChevronRight className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 shrink-0" />
         )}
         <span>{title}</span>
       </button>
@@ -1541,20 +1663,39 @@ const FxSlider: React.FC<{
   max: number;
   step: number;
   onChange: (val: number) => void;
-}> = ({ label, value, display, min, max, step, onChange }) => (
-  <div>
-    <div className="flex items-center justify-between text-[11px] mb-1">
-      <span className="text-slate-400">{label}</span>
-      <span className="text-slate-200 font-mono-tabular">{display}</span>
+  onCommitHistory?: () => void;
+}> = ({ label, value, display, min, max, step, onChange, onCommitHistory }) => {
+  const committedRef = useRef(false);
+  return (
+    <div>
+      <div className="flex items-center justify-between text-[11px] mb-1">
+        <span className="text-slate-500 dark:text-slate-400">{label}</span>
+        <span className="text-slate-800 dark:text-slate-200 font-mono-tabular">{display}</span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => {
+          if (!committedRef.current) {
+            onCommitHistory?.();
+            committedRef.current = true;
+          }
+          onChange(Number(e.target.value));
+        }}
+        onPointerUp={() => {
+          committedRef.current = false;
+        }}
+        onPointerCancel={() => {
+          committedRef.current = false;
+        }}
+        onBlur={() => {
+          committedRef.current = false;
+        }}
+        className="studio-slider w-full"
+      />
     </div>
-    <input
-      type="range"
-      min={min}
-      max={max}
-      step={step}
-      value={value}
-      onChange={(e) => onChange(Number(e.target.value))}
-      className="studio-slider w-full"
-    />
-  </div>
-);
+  );
+};

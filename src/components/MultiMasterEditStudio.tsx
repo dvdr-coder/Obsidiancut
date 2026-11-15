@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Camera,
   FolderKanban,
@@ -114,12 +114,25 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
     [assets],
   );
 
-  // Auto-seed Multi-Cam quad selection from uploaded visual assets
+  const hasAutoSeededRef = useRef<boolean>(false);
+
+  // Auto-seed Multi-Cam quad selection once per visual pool and prune deleted asset IDs
   useEffect(() => {
-    if (multicamIds.length === 0 && visualAssets.length > 0) {
-      setMulticamIds(visualAssets.slice(0, 4).map((a) => a.id));
+    if (visualAssets.length === 0) {
+      hasAutoSeededRef.current = false;
+      setMulticamIds([]);
+      return;
     }
-  }, [visualAssets, multicamIds.length]);
+    const validSet = new Set(visualAssets.map((a) => a.id));
+    setMulticamIds((prev) => {
+      const filtered = prev.filter((id) => validSet.has(id));
+      if (!hasAutoSeededRef.current && filtered.length === 0) {
+        hasAutoSeededRef.current = true;
+        return visualAssets.slice(0, 4).map((a) => a.id);
+      }
+      return filtered.length === prev.length ? prev : filtered;
+    });
+  }, [visualAssets]);
 
   const multicamAssets = useMemo(
     () =>
@@ -202,13 +215,13 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
   return (
     <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-[430px] text-xs">
       {/* Column 1 (5 cols): MultiMaster Precision Trim + Nested Timelines */}
-      <section className="lg:col-span-5 bg-[#14171d] border border-[#232832] rounded-lg flex flex-col overflow-hidden">
-        <div className="px-3.5 py-2 border-b border-[#232832] bg-[#171b22] flex items-center justify-between">
+      <section className="lg:col-span-5 bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg flex flex-col overflow-hidden shadow-xs dark:shadow-none">
+        <div className="px-3.5 py-2 border-b border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#171b22] flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            <Scissors className="w-3.5 h-3.5 text-blue-400" />
-            <span className="font-semibold text-slate-100">MultiMaster Trim & Nested Timelines</span>
+            <Scissors className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+            <span className="font-semibold text-slate-900 dark:text-slate-100">MultiMaster Trim & Nested Timelines</span>
           </div>
-          <span className="text-[10px] font-mono-tabular text-slate-400">
+          <span className="text-[10px] font-mono-tabular text-slate-500 dark:text-slate-400">
             {formatFrameTimecode(playhead, fps)}
           </span>
         </div>
@@ -216,7 +229,7 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
         <div className="flex-1 overflow-y-auto p-3 space-y-3.5">
           {/* Trim Mode Selector */}
           <div className="space-y-1.5">
-            <span className="text-[10px] text-slate-400">Precision Trim Mode</span>
+            <span className="text-[10px] text-slate-500 dark:text-slate-400">Precision Trim Mode</span>
             <div className="grid grid-cols-5 gap-1">
               {(
                 [
@@ -234,7 +247,7 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
                   className={`py-1 rounded text-[10px] font-medium border cursor-pointer ${
                     trimMode === m
                       ? 'bg-blue-600 border-blue-500 text-white'
-                      : 'bg-[#0e1116] border-[#252b37] text-slate-300 hover:text-white'
+                      : 'bg-slate-50 dark:bg-[#0e1116] border-slate-300 dark:border-[#252b37] text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
                   }`}
                 >
                   {lbl}
@@ -245,29 +258,29 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
 
           {/* Dual A/B Edit Point Inspector */}
           <div className="grid grid-cols-2 gap-2">
-            <div className="rounded border border-[#232832] bg-[#0e1116] p-2 space-y-1">
-              <div className="flex items-center justify-between text-[10px] text-slate-400">
+            <div className="rounded border border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#0e1116] p-2 space-y-1">
+              <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
                 <span>Outgoing (Clip A)</span>
-                <span className="font-mono-tabular text-blue-300">OUT</span>
+                <span className="font-mono-tabular text-blue-600 dark:text-blue-300">OUT</span>
               </div>
-              <p className="font-medium text-slate-100 truncate">
+              <p className="font-medium text-slate-900 dark:text-slate-100 truncate">
                 {trimPair.clipA?.name || 'No clip selected'}
               </p>
-              <p className="text-[10px] font-mono-tabular text-slate-400">
+              <p className="text-[10px] font-mono-tabular text-slate-500 dark:text-slate-400">
                 {trimPair.clipA
                   ? `End: ${(trimPair.clipA.startTime + trimPair.clipA.duration).toFixed(2)}s · Trim ${trimPair.clipA.trimStart.toFixed(2)}s`
                   : '—'}
               </p>
             </div>
-            <div className="rounded border border-[#232832] bg-[#0e1116] p-2 space-y-1">
-              <div className="flex items-center justify-between text-[10px] text-slate-400">
+            <div className="rounded border border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#0e1116] p-2 space-y-1">
+              <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
                 <span>Incoming (Clip B)</span>
-                <span className="font-mono-tabular text-emerald-300">IN</span>
+                <span className="font-mono-tabular text-emerald-600 dark:text-emerald-300">IN</span>
               </div>
-              <p className="font-medium text-slate-100 truncate">
+              <p className="font-medium text-slate-900 dark:text-slate-100 truncate">
                 {trimPair.clipB?.name || 'End of Track'}
               </p>
-              <p className="text-[10px] font-mono-tabular text-slate-400">
+              <p className="text-[10px] font-mono-tabular text-slate-500 dark:text-slate-400">
                 {trimPair.clipB
                   ? `Start: ${trimPair.clipB.startTime.toFixed(2)}s · Trim ${trimPair.clipB.trimStart.toFixed(2)}s`
                   : '—'}
@@ -283,7 +296,7 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
                 type="button"
                 disabled={!trimPair.clipA}
                 onClick={() => onNudgeTrim(trimPair.clipA!.id, trimPair.clipB?.id || null, df)}
-                className="py-1.5 rounded bg-[#1a1f28] hover:bg-blue-600 border border-[#2a313e] disabled:opacity-40 font-mono-tabular text-[10px] font-semibold text-slate-200 hover:text-white cursor-pointer"
+                className="py-1.5 rounded bg-slate-100 hover:bg-blue-600 dark:bg-[#1a1f28] dark:hover:bg-blue-600 border border-slate-300 dark:border-[#2a313e] disabled:opacity-40 font-mono-tabular text-[10px] font-semibold text-slate-800 dark:text-slate-200 hover:text-white cursor-pointer"
               >
                 {df > 0 ? `+${df}f` : `${df}f`}
               </button>
@@ -291,10 +304,10 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
           </div>
 
           {/* In / Out Range Extract */}
-          <div className="p-2.5 rounded border border-[#232832] bg-[#101318] space-y-2">
+          <div className="p-2.5 rounded border border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#101318] space-y-2">
             <div className="flex items-center justify-between text-[11px]">
-              <span className="font-semibold text-slate-200">Three-Point In/Out Range</span>
-              <span className="font-mono-tabular text-[10px] text-slate-400">
+              <span className="font-semibold text-slate-800 dark:text-slate-200">Three-Point In/Out Range</span>
+              <span className="font-mono-tabular text-[10px] text-slate-500 dark:text-slate-400">
                 {markIn !== null ? `${markIn.toFixed(2)}s` : 'In: —'} →{' '}
                 {markOut !== null ? `${markOut.toFixed(2)}s` : 'Out: —'}
               </span>
@@ -303,14 +316,14 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
               <button
                 type="button"
                 onClick={() => onSetMarkIn(Number(playhead.toFixed(3)))}
-                className="flex-1 py-1 rounded bg-[#1b2029] hover:bg-[#252c38] border border-[#2b3342] text-[10px] text-slate-200 cursor-pointer"
+                className="flex-1 py-1 rounded bg-white hover:bg-slate-100 dark:bg-[#1b2029] dark:hover:bg-[#252c38] border border-slate-300 dark:border-[#2b3342] text-[10px] text-slate-800 dark:text-slate-200 cursor-pointer"
               >
                 Mark In (I)
               </button>
               <button
                 type="button"
                 onClick={() => onSetMarkOut(Number(playhead.toFixed(3)))}
-                className="flex-1 py-1 rounded bg-[#1b2029] hover:bg-[#252c38] border border-[#2b3342] text-[10px] text-slate-200 cursor-pointer"
+                className="flex-1 py-1 rounded bg-white hover:bg-slate-100 dark:bg-[#1b2029] dark:hover:bg-[#252c38] border border-slate-300 dark:border-[#2b3342] text-[10px] text-slate-800 dark:text-slate-200 cursor-pointer"
               >
                 Mark Out (O)
               </button>
@@ -318,7 +331,7 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
                 type="button"
                 disabled={markIn === null || markOut === null || Math.abs((markOut ?? 0) - (markIn ?? 0)) < 0.05}
                 onClick={onExtractInOutRange}
-                className="flex-1 py-1 rounded bg-amber-600/80 hover:bg-amber-500 disabled:opacity-40 text-[10px] font-semibold text-white cursor-pointer"
+                className="flex-1 py-1 rounded bg-amber-600/90 hover:bg-amber-500 disabled:opacity-40 text-[10px] font-semibold text-white cursor-pointer"
               >
                 Ripple Extract
               </button>
@@ -326,9 +339,9 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
           </div>
 
           {/* Nested Timelines / Compound Sequences */}
-          <div className="pt-2 border-t border-[#232832] space-y-2">
+          <div className="pt-2 border-t border-slate-200 dark:border-[#232832] space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-slate-200">
+              <span className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">
                 Nested Timelines ({nestedSequences.length})
               </span>
             </div>
@@ -338,7 +351,7 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
                 value={nestName}
                 onChange={(e) => setNestName(e.target.value)}
                 placeholder="Sub-timeline name..."
-                className="flex-1 min-w-0 h-7 px-2 rounded bg-[#0e1116] border border-[#2a303d] text-[11px] text-slate-100"
+                className="flex-1 min-w-0 h-7 px-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-[11px] text-slate-900 dark:text-slate-100"
               />
               <button
                 type="button"
@@ -355,10 +368,10 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
                 {nestedSequences.map((seq) => (
                   <div
                     key={seq.id}
-                    className="px-2 py-1.5 rounded bg-[#101318] border border-[#222732] flex items-center justify-between gap-2"
+                    className="px-2 py-1.5 rounded bg-slate-50 dark:bg-[#101318] border border-slate-200 dark:border-[#222732] flex items-center justify-between gap-2"
                   >
                     <div className="min-w-0">
-                      <p className="text-[11px] font-medium text-slate-200 truncate">{seq.name}</p>
+                      <p className="text-[11px] font-medium text-slate-800 dark:text-slate-200 truncate">{seq.name}</p>
                       <p className="text-[9px] font-mono-tabular text-slate-500">
                         {seq.clips.length} clips · {seq.tracks.length} tracks
                       </p>
@@ -367,14 +380,14 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
                       <button
                         type="button"
                         onClick={() => onLoadNestedSequence(seq.id)}
-                        className="px-2 py-0.5 rounded bg-[#1d222b] hover:bg-blue-600 text-[10px] text-slate-200 hover:text-white cursor-pointer"
+                        className="px-2 py-0.5 rounded bg-white hover:bg-blue-600 dark:bg-[#1d222b] dark:hover:bg-blue-600 border border-slate-300 dark:border-transparent text-[10px] text-slate-800 dark:text-slate-200 hover:text-white cursor-pointer"
                       >
                         Open
                       </button>
                       <button
                         type="button"
                         onClick={() => onDeleteNestedSequence(seq.id)}
-                        className="p-1 text-slate-500 hover:text-red-400 cursor-pointer"
+                        className="p-1 text-slate-500 hover:text-red-500 dark:hover:text-red-400 cursor-pointer"
                       >
                         <Trash2 className="w-3 h-3" />
                       </button>
@@ -388,17 +401,17 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
       </section>
 
       {/* Column 2 (4 cols): Multi-Camera Synchronization & Live Angle Switcher */}
-      <section className="lg:col-span-4 bg-[#14171d] border border-[#232832] rounded-lg flex flex-col overflow-hidden">
-        <div className="px-3.5 py-2 border-b border-[#232832] bg-[#171b22] flex items-center justify-between">
+      <section className="lg:col-span-4 bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg flex flex-col overflow-hidden shadow-xs dark:shadow-none">
+        <div className="px-3.5 py-2 border-b border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#171b22] flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            <Camera className="w-3.5 h-3.5 text-amber-400" />
-            <span className="font-semibold text-slate-100">Multi-Camera Sync</span>
+            <Camera className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            <span className="font-semibold text-slate-900 dark:text-slate-100">Multi-Camera Sync</span>
           </div>
           <div className="flex items-center gap-1">
             <select
               value={syncMethod}
               onChange={(e) => setSyncMethod(e.target.value as 'audio_peak' | 'timecode' | 'manual')}
-              className="h-6 px-1.5 rounded bg-[#0e1116] border border-[#2a303d] text-[10px] text-slate-200"
+              className="h-6 px-1.5 rounded bg-white dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-[10px] text-slate-800 dark:text-slate-200"
             >
               <option value="audio_peak">Sync: Audio Peak</option>
               <option value="timecode">Sync: Timecode</option>
@@ -407,17 +420,17 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
             <button
               type="button"
               onClick={handleAutoSyncAngles}
-              className="px-2 h-6 rounded bg-[#1d222b] hover:bg-blue-600 border border-[#2c3442] text-[10px] text-slate-200 hover:text-white cursor-pointer"
+              className="px-2 h-6 rounded bg-white hover:bg-blue-600 dark:bg-[#1d222b] dark:hover:bg-blue-600 border border-slate-300 dark:border-[#2c3442] text-[10px] text-slate-800 dark:text-slate-200 hover:text-white cursor-pointer"
             >
               Align
             </button>
           </div>
         </div>
 
-        <div className="flex-1 p-3 flex flex-col gap-2.5 overflow-y-auto bg-[#0c0e13]">
+        <div className="flex-1 p-3 flex flex-col gap-2.5 overflow-y-auto bg-slate-100 dark:bg-[#0c0e13]">
           {multicamAssets.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center p-4 text-slate-500">
-              <Video className="w-5 h-5 mb-1.5 text-slate-600" />
+              <Video className="w-5 h-5 mb-1.5 text-slate-400 dark:text-slate-600" />
               <p>Upload 2–4 video clips or photos to populate the Multi-Cam Angle Grid.</p>
             </div>
           ) : (
@@ -434,7 +447,7 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
                       onSwitchMulticamAngle(asset, idx + 1);
                     }}
                     className={`relative aspect-video rounded overflow-hidden border text-left group cursor-pointer ${
-                      isLive ? 'border-red-500 ring-1 ring-red-500/40' : 'border-[#283040] hover:border-blue-400'
+                      isLive ? 'border-red-500 ring-1 ring-red-500/40' : 'border-slate-300 dark:border-[#283040] hover:border-blue-400'
                     }`}
                   >
                     {asset.thumbUrl ? (
@@ -445,7 +458,7 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <div className="w-full h-full bg-[#151a22] flex items-center justify-center text-slate-500">
+                      <div className="w-full h-full bg-slate-200 dark:bg-[#151a22] flex items-center justify-center text-slate-500">
                         CAM {idx + 1}
                       </div>
                     )}
@@ -465,8 +478,8 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
 
           {/* Angle Picker & Offset Controls */}
           {visualAssets.length > 0 && (
-            <div className="pt-2 border-t border-[#222732] space-y-1.5">
-              <p className="text-[10px] text-slate-400">
+            <div className="pt-2 border-t border-slate-200 dark:border-[#222732] space-y-1.5">
+              <p className="text-[10px] text-slate-600 dark:text-slate-400">
                 Click any camera quadrant above to insert an angle cut at playhead ({playhead.toFixed(2)}s).
               </p>
               <div className="max-h-24 overflow-y-auto space-y-1">
@@ -475,7 +488,7 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
                   return (
                     <label
                       key={a.id}
-                      className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-[#12161e] border border-[#222732] text-[10px] cursor-pointer"
+                      className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-white dark:bg-[#12161e] border border-slate-200 dark:border-[#222732] text-[10px] cursor-pointer"
                     >
                       <div className="flex items-center gap-1.5 min-w-0">
                         <input
@@ -489,7 +502,7 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
                             }
                           }}
                         />
-                        <span className="truncate text-slate-200">{a.name}</span>
+                        <span className="truncate text-slate-800 dark:text-slate-200">{a.name}</span>
                       </div>
                       <span className="font-mono-tabular text-slate-500 shrink-0">
                         {a.width}×{a.height}
@@ -504,15 +517,15 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
       </section>
 
       {/* Column 3 (3 cols): Power Bins & Smart Bins for Team Workflows */}
-      <aside className="lg:col-span-3 bg-[#14171d] border border-[#232832] rounded-lg flex flex-col overflow-hidden">
-        <div className="flex border-b border-[#232832] bg-[#171b22]">
+      <aside className="lg:col-span-3 bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg flex flex-col overflow-hidden shadow-xs dark:shadow-none">
+        <div className="flex border-b border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#171b22]">
           <button
             type="button"
             onClick={() => setBinTab('power')}
             className={`flex-1 py-2 text-[11px] font-semibold flex items-center justify-center gap-1 cursor-pointer ${
               binTab === 'power'
-                ? 'text-white border-b-2 border-blue-500 bg-[#14171d]'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'text-slate-900 dark:text-white border-b-2 border-blue-500 bg-white dark:bg-[#14171d]'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
             <FolderKanban className="w-3 h-3" />
@@ -523,8 +536,8 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
             onClick={() => setBinTab('smart')}
             className={`flex-1 py-2 text-[11px] font-semibold flex items-center justify-center gap-1 cursor-pointer ${
               binTab === 'smart'
-                ? 'text-white border-b-2 border-blue-500 bg-[#14171d]'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'text-slate-900 dark:text-white border-b-2 border-blue-500 bg-white dark:bg-[#14171d]'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
             <Sparkles className="w-3 h-3" />
@@ -540,7 +553,7 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
                 value={newPowerBinName}
                 onChange={(e) => setNewPowerBinName(e.target.value)}
                 placeholder="New Team Power Bin"
-                className="flex-1 min-w-0 h-7 px-2 rounded bg-[#0e1116] border border-[#2a303d] text-[11px] text-slate-100"
+                className="flex-1 min-w-0 h-7 px-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-[11px] text-slate-900 dark:text-slate-100"
               />
               <button
                 type="button"
@@ -561,7 +574,7 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
             <select
               value={activePowerBinId}
               onChange={(e) => setActivePowerBinId(e.target.value)}
-              className="w-full h-7 px-2 rounded bg-[#0e1116] border border-[#2a303d] text-[11px] text-slate-100"
+              className="w-full h-7 px-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-[11px] text-slate-900 dark:text-slate-100"
             >
               {powerBins.map((b) => (
                 <option key={b.id} value={b.id}>
@@ -584,7 +597,7 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
                     ),
                   );
                 }}
-                className="w-full h-7 px-2 rounded bg-[#101318] border border-dashed border-[#343c4d] text-[11px] text-slate-300"
+                className="w-full h-7 px-2 rounded bg-slate-50 dark:bg-[#101318] border border-dashed border-slate-300 dark:border-[#343c4d] text-[11px] text-slate-700 dark:text-slate-300"
               >
                 <option value="">+ Link asset to “{activePowerBin.name}”...</option>
                 {assets.map((a) => (
@@ -604,13 +617,13 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
                 powerBinAssets.map((a) => (
                   <div
                     key={a.id}
-                    className="p-1.5 rounded bg-[#101318] border border-[#222732] flex items-center justify-between gap-1.5"
+                    className="p-1.5 rounded bg-slate-50 dark:bg-[#101318] border border-slate-200 dark:border-[#222732] flex items-center justify-between gap-1.5"
                   >
-                    <span className="truncate text-[11px] text-slate-200">{a.name}</span>
+                    <span className="truncate text-[11px] text-slate-800 dark:text-slate-200">{a.name}</span>
                     <button
                       type="button"
                       onClick={() => onAddVisualToTimeline(a, false)}
-                      className="px-1.5 py-0.5 rounded bg-[#1d222b] hover:bg-blue-600 text-[10px] text-slate-200 hover:text-white shrink-0 cursor-pointer"
+                      className="px-1.5 py-0.5 rounded bg-white hover:bg-blue-600 dark:bg-[#1d222b] dark:hover:bg-blue-600 border border-slate-300 dark:border-transparent text-[10px] text-slate-800 dark:text-slate-200 hover:text-white shrink-0 cursor-pointer"
                     >
                       <Plus className="w-3 h-3" />
                     </button>
@@ -629,29 +642,29 @@ export const MultiMasterEditStudio: React.FC<MultiMasterEditStudioProps> = ({
                   onClick={() => setSelectedSmartBinId(sb.id)}
                   className={`w-full px-2.5 py-1.5 rounded border text-left text-[11px] transition-colors cursor-pointer ${
                     selectedSmartBinId === sb.id
-                      ? 'bg-blue-600/20 border-blue-500 text-blue-100'
-                      : 'bg-[#101318] border-[#222732] text-slate-300 hover:border-slate-500'
+                      ? 'bg-blue-50 dark:bg-blue-600/20 border-blue-500 text-blue-800 dark:text-blue-100'
+                      : 'bg-slate-50 dark:bg-[#101318] border-slate-200 dark:border-[#222732] text-slate-700 dark:text-slate-300 hover:border-slate-400 dark:hover:border-slate-500'
                   }`}
                 >
                   {sb.name}
                 </button>
               ))}
             </div>
-            <div className="pt-2 border-t border-[#232832] space-y-1.5">
-              <p className="text-[10px] font-mono-tabular text-slate-400">
+            <div className="pt-2 border-t border-slate-200 dark:border-[#232832] space-y-1.5">
+              <p className="text-[10px] font-mono-tabular text-slate-500 dark:text-slate-400">
                 Matches: {smartBinAssets.length} items
               </p>
               {smartBinAssets.map((a) => (
                 <div
                   key={a.id}
-                  className="p-1.5 rounded bg-[#101318] border border-[#222732] flex items-center justify-between gap-1.5"
+                  className="p-1.5 rounded bg-slate-50 dark:bg-[#101318] border border-slate-200 dark:border-[#222732] flex items-center justify-between gap-1.5"
                 >
-                  <span className="truncate text-[11px] text-slate-200">{a.name}</span>
+                  <span className="truncate text-[11px] text-slate-800 dark:text-slate-200">{a.name}</span>
                   {a.mediaType !== 'audio' && (
                     <button
                       type="button"
                       onClick={() => onAddVisualToTimeline(a, false)}
-                      className="px-1.5 py-0.5 rounded bg-[#1d222b] hover:bg-blue-600 text-[10px] text-slate-200 hover:text-white shrink-0 cursor-pointer"
+                      className="px-1.5 py-0.5 rounded bg-white hover:bg-blue-600 dark:bg-[#1d222b] dark:hover:bg-blue-600 border border-slate-300 dark:border-transparent text-[10px] text-slate-800 dark:text-slate-200 hover:text-white shrink-0 cursor-pointer"
                     >
                       +V1
                     </button>
