@@ -1,5 +1,5 @@
 /**
- * Interactive SVG diagram definitions & node inspection metadata for website_folder.
+ * Interactive SVG diagram definitions & node inspection metadata for docs/.
  * Clicking any node in an SVG updates the diagram inspector panel with files, ports, and flows.
  */
 window.OBSIDIAN_DIAGRAMS = {

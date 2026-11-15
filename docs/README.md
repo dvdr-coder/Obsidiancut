@@ -1,4 +1,4 @@
-# Obsidian Cut — Documentation & Architecture Website (`website_folder/`)
+# Obsidian Cut — Documentation & Architecture Website (`docs/`)
 
 A complete, zero-build static website explaining Obsidian Cut's architecture, codebase, interactive audio/video pipelines, multi-platform installation, REST API, and `autoengine` batch CLI.
 
@@ -14,20 +14,20 @@ A complete, zero-build static website explaining Obsidian Cut's architecture, co
 
 ## Preview Locally
 
-You can open `website_folder/index.html` directly in any browser (`file://`), or serve it locally:
+You can open `docs/index.html` directly in any browser (`file://`), or serve it locally:
 
 ```bash
 # Python 3 static server
-python3 -m http.server 8080 --directory website_folder
+python3 -m http.server 8080 --directory docs
 # Visit http://localhost:8080
 ```
 
 ## Deploying as Your Website
 
-Because `website_folder/` has **zero build steps and zero external CDN dependencies**, you can deploy the folder directly to any static host:
-- **GitHub Pages**: Publish directly from `/website_folder` (or copy its contents into `docs/`).
-- **Netlify / Vercel / Cloudflare Pages**: Set the publish/output directory to `website_folder`.
-- **Nginx / Apache**: Point your document root to `website_folder/`.
+Because `docs/` has **zero build steps and zero external CDN dependencies**, you can deploy the folder directly to any static host:
+- **GitHub Pages**: Publish directly from the `/docs` folder in your repository settings.
+- **Netlify / Vercel / Cloudflare Pages**: Set the publish/output directory to `docs`.
+- **Nginx / Apache**: Point your document root to `docs/`.
 
 ## Customizing Content
 
