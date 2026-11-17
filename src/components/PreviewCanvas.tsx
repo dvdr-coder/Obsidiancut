@@ -6,6 +6,7 @@ import {
   Crop,
   FolderPlus,
   Loader2,
+  MonitorUp,
   Move,
   Pause,
   Play,
@@ -22,6 +23,7 @@ import {
   ColorGradeConfig,
   ExportConfig,
   MediaAsset,
+  PreviewClarityMode,
   TimelineClip,
   TimelineTrack,
 } from '../types/editor';
@@ -66,6 +68,11 @@ interface PreviewCanvasProps {
   loadingSample?: boolean;
   uploading?: boolean;
   defaultShowSpectrum?: boolean;
+  clarityMode?: PreviewClarityMode;
+  isDetachedMode?: boolean;
+  extendedScreenCount?: number;
+  onClarityModeChange?: (mode: PreviewClarityMode) => void;
+  onDetachPreview?: () => void;
   onPlayheadChange: (t: number) => void;
   onTogglePlay: () => void;
   onToggleMute: () => void;
@@ -155,6 +162,8 @@ function drawTransformedMedia(
   }
 
   ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
 
   // Compute fadeIn / fadeOut envelope
   const elapsed = localProgress * clip.duration;
@@ -311,6 +320,11 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   loadingSample = false,
   uploading = false,
   defaultShowSpectrum = false,
+  clarityMode = 'hd',
+  isDetachedMode = false,
+  extendedScreenCount = 1,
+  onClarityModeChange,
+  onDetachPreview,
   onPlayheadChange,
   onTogglePlay,
   onToggleMute,
@@ -366,12 +380,22 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
   const totalDuration = useMemo(() => computeTimelineDuration(clips), [clips]);
 
   const { canvasW, canvasH } = useMemo(() => {
+    if (clarityMode === 'ultra') {
+      if (resolution === '1080x1920') return { canvasW: 1080, canvasH: 1920 };
+      if (resolution === '1080x1080') return { canvasW: 1080, canvasH: 1080 };
+      return { canvasW: 1920, canvasH: 1080 };
+    }
+    if (clarityMode === 'hd') {
+      if (resolution === '1080x1920') return { canvasW: 720, canvasH: 1280 };
+      if (resolution === '1080x1080') return { canvasW: 768, canvasH: 768 };
+      return { canvasW: 1280, canvasH: 720 };
+    }
     if (resolution === '1080x1920') return { canvasW: 360, canvasH: 640 };
     if (resolution === '1080x1080') return { canvasW: 512, canvasH: 512 };
     return { canvasW: 854, canvasH: 480 };
-  }, [resolution]);
+  }, [resolution, clarityMode]);
 
-  // Preload media elements using lightweight proxies when available, keyed per clip for videos, and evict deleted items
+  // Preload media elements; prefer native resolution assets in HD/Ultra clarity modes for razor-sharp playback
   useEffect(() => {
     const activeImageIds = new Set<string>();
     const activeVideoClipIds = new Set<string>();
@@ -381,7 +405,14 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
       const asset = assetsMap.get(c.mediaId);
       if (!asset) continue;
       if (asset.mediaType !== 'image' && asset.mediaType !== 'video') continue;
-      const targetUrl = asset.proxyUrl || asset.fileUrl;
+      const targetUrl =
+        asset.mediaType === 'image'
+          ? clarityMode === 'standard'
+            ? asset.proxyUrl || asset.fileUrl
+            : asset.fileUrl
+          : clarityMode === 'ultra'
+            ? asset.fileUrl
+            : asset.proxyUrl || asset.fileUrl;
 
       if (asset.mediaType === 'image') {
         activeImageIds.add(c.mediaId);
@@ -439,7 +470,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
         videoCacheRef.current.delete(clipId);
       }
     }
-  }, [clips, assetsMap]);
+  }, [clips, assetsMap, clarityMode]);
 
   // Manage audio elements
   useEffect(() => {
@@ -690,6 +721,8 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
       bufCanvas.height = canvasH;
     }
 
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.fillStyle = '#090b0e';
     ctx.fillRect(0, 0, canvasW, canvasH);
 
@@ -702,9 +735,11 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
       if (clip.kind === 'title' && clip.title) {
         const bufCtx = bufCanvas.getContext('2d');
         if (!bufCtx) return null;
+        bufCtx.imageSmoothingEnabled = true;
+        bufCtx.imageSmoothingQuality = 'high';
         bufCtx.clearRect(0, 0, canvasW, canvasH);
         const prog = (t - clip.startTime) / Math.max(0.1, clip.duration);
-        drawVectorTitle(bufCtx, clip.title, canvasW, canvasH, Math.max(0, Math.min(1, prog)));
+        drawVectorTitle(bufCtx, clip.title, canvasW, canvasH, Math.max(0, Math.min(1, prog)), clip.duration);
         return { el: bufCanvas, w: canvasW, h: canvasH };
       }
       if (!clip.mediaId) return null;
@@ -1353,47 +1388,49 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-[#101318] border border-slate-200 dark:border-[#232832] rounded-lg overflow-hidden shadow-xs dark:shadow-none">
-      {/* Layer Canvas Tool Bar (Resize / Crop direct manipulation) */}
-      {clips.length > 0 && (
+      {/* Layer Canvas Tool Bar + Clarity & Extended Display Controls */}
+      {!isDetachedMode && (
         <div className="h-8 px-3 border-b border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#14171d] flex items-center justify-between gap-2 text-[11px] shrink-0">
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setActiveTool('resize')}
-              title="Move & resize selected layer directly on preview canvas"
-              className={`px-2 py-0.5 rounded flex items-center gap-1 font-medium transition-colors cursor-pointer ${
-                activeTool === 'resize'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-200 dark:bg-[#1b2029] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <Move className="w-3 h-3" />
-              <span>Resize / Move</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTool('crop')}
-              title="Drag edge or corner handles on preview canvas to crop layer"
-              className={`px-2 py-0.5 rounded flex items-center gap-1 font-medium transition-colors cursor-pointer ${
-                activeTool === 'crop'
-                  ? 'bg-amber-600 text-white'
-                  : 'bg-slate-200 dark:bg-[#1b2029] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <Crop className="w-3 h-3" />
-              <span>Crop</span>
-            </button>
-          </div>
+          {clips.length > 0 ? (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setActiveTool('resize')}
+                title="Move & resize selected layer directly on preview canvas"
+                className={`px-2 py-0.5 rounded flex items-center gap-1 font-medium transition-colors cursor-pointer ${
+                  activeTool === 'resize'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-200 dark:bg-[#1b2029] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Move className="w-3 h-3" />
+                <span>Resize / Move</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTool('crop')}
+                title="Drag edge or corner handles on preview canvas to crop layer"
+                className={`px-2 py-0.5 rounded flex items-center gap-1 font-medium transition-colors cursor-pointer ${
+                  activeTool === 'crop'
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-slate-200 dark:bg-[#1b2029] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Crop className="w-3 h-3" />
+                <span>Crop</span>
+              </button>
+            </div>
+          ) : (
+            <span className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
+              Preview Monitor
+            </span>
+          )}
 
-          <div className="flex items-center gap-2 min-w-0">
-            {selectedActiveEntry ? (
+          <div className="flex items-center gap-1.5 min-w-0">
+            {clips.length > 0 && selectedActiveEntry && (
               <>
-                <span className="text-slate-600 dark:text-slate-400 truncate max-w-[140px]">
+                <span className="text-slate-600 dark:text-slate-400 truncate max-w-[110px] hidden xl:inline">
                   {selectedActiveEntry.clip.name}
-                </span>
-                <span className="text-slate-800 dark:text-slate-300 font-mono-tabular hidden sm:inline">
-                  {Math.round((selectedActiveEntry.clip.scale || 1) * (selectedActiveEntry.clip.scaleX ?? 1) * 100)}%×
-                  {Math.round((selectedActiveEntry.clip.scale || 1) * (selectedActiveEntry.clip.scaleY ?? 1) * 100)}%
                 </span>
                 {selectedHasSizeMod && onUpdateClip && (
                   <button
@@ -1406,7 +1443,7 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
                     title="Reset layer size & position"
                   >
                     <RotateCcw className="w-2.5 h-2.5" />
-                    <span>Reset Size</span>
+                    <span className="hidden sm:inline">Reset</span>
                   </button>
                 )}
                 {selectedHasCrop && onUpdateClip && (
@@ -1424,10 +1461,52 @@ export const PreviewCanvas: React.FC<PreviewCanvasProps> = ({
                   </button>
                 )}
               </>
-            ) : (
-              <span className="text-[10px] text-slate-500 truncate">
-                Click a layer on canvas or timeline to resize & crop
-              </span>
+            )}
+
+            {onClarityModeChange && (
+              <div
+                className="inline-flex items-center rounded border border-slate-300 dark:border-[#2a303d] bg-white dark:bg-[#0e1116] overflow-hidden shrink-0"
+                title="Preview Render Clarity (HD / Ultra loads full native resolution)"
+              >
+                {(
+                  [
+                    { id: 'standard', label: 'Std' },
+                    { id: 'hd', label: 'HD' },
+                    { id: 'ultra', label: 'Ultra' },
+                  ] as const
+                ).map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => onClarityModeChange(item.id)}
+                    className={`px-1.5 py-0.5 text-[10px] font-medium transition-colors cursor-pointer ${
+                      clarityMode === item.id
+                        ? 'bg-blue-600 text-white'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {onDetachPreview && (
+              <button
+                type="button"
+                onClick={onDetachPreview}
+                title={
+                  extendedScreenCount > 1
+                    ? 'Send crystal-clear Preview Monitor to Extended Display window'
+                    : 'Pop out Preview Monitor into a separate window so workspace expands'
+                }
+                className="px-2 py-0.5 rounded bg-slate-200 dark:bg-[#1b2029] hover:bg-blue-600 hover:text-white text-slate-700 dark:text-slate-200 flex items-center gap-1 font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <MonitorUp className="w-3 h-3" />
+                <span className="hidden sm:inline">
+                  {extendedScreenCount > 1 ? 'Extended Window' : 'Pop Out'}
+                </span>
+              </button>
             )}
           </div>
         </div>

@@ -1079,21 +1079,53 @@ def render_job_worker(job_id: str, payload: dict) -> None:
             uses_zoompan = c_kind == "image" and motion in {"zoomIn", "zoomOut", "panLeft", "panRight"}
 
             cur_inp = input_idx
+            has_anim_frames = False
             if c_kind == "title":
-                png_b64 = clip.get("renderedOverlayPng", "")
-                tmp_png = RENDER_DIR / f"_ov_{job_id}_{c_idx}.png"
-                png_bytes = blank_png_bytes
-                if png_b64 and "," in png_b64:
-                    try:
-                        decoded = base64.b64decode(png_b64.split(",", 1)[1])
-                        if decoded.startswith(b"\x89PNG\r\n\x1a\n"):
-                            png_bytes = decoded
-                    except Exception:
-                        png_bytes = blank_png_bytes
-                tmp_png.write_bytes(png_bytes)
-                temp_files.append(tmp_png)
+                overlay_frames = clip.get("renderedOverlayFrames")
                 is_credits = (clip.get("title") or {}).get("template") == "scrolling_credits"
-                cmd.extend(["-framerate", fps_expr, "-i", str(tmp_png)])
+                if isinstance(overlay_frames, list) and len(overlay_frames) > 0 and not is_credits:
+                    has_anim_frames = True
+                    concat_lines = ["ffconcat version 1.0"]
+                    last_frame_path: Path | None = None
+                    for f_idx, fr in enumerate(overlay_frames):
+                        f_png_b64 = fr.get("png", "") if isinstance(fr, dict) else ""
+                        f_dur = max(0.015, safe_float(fr.get("duration", 0.05) if isinstance(fr, dict) else 0.05, 0.05, 0.015, 3600.0))
+                        f_path = RENDER_DIR / f"_ov_{job_id}_{c_idx}_{f_idx}.png"
+                        f_bytes = blank_png_bytes
+                        if f_png_b64 and "," in f_png_b64:
+                            try:
+                                dec = base64.b64decode(f_png_b64.split(",", 1)[1])
+                                if dec.startswith(b"\x89PNG\r\n\x1a\n"):
+                                    f_bytes = dec
+                            except Exception:
+                                f_bytes = blank_png_bytes
+                        f_path.write_bytes(f_bytes)
+                        temp_files.append(f_path)
+                        safe_p = str(f_path.resolve()).replace("\\", "/").replace("'", "\\'")
+                        concat_lines.append(f"file '{safe_p}'")
+                        concat_lines.append(f"duration {f_dur:.4f}")
+                        last_frame_path = f_path
+                    if last_frame_path is not None:
+                        safe_last = str(last_frame_path.resolve()).replace("\\", "/").replace("'", "\\'")
+                        concat_lines.append(f"file '{safe_last}'")
+                    concat_path = RENDER_DIR / f"_ov_{job_id}_{c_idx}.ffconcat"
+                    concat_path.write_text("\n".join(concat_lines) + "\n", encoding="utf-8")
+                    temp_files.append(concat_path)
+                    cmd.extend(["-f", "concat", "-safe", "0", "-i", str(concat_path)])
+                else:
+                    png_b64 = clip.get("renderedOverlayPng", "")
+                    tmp_png = RENDER_DIR / f"_ov_{job_id}_{c_idx}.png"
+                    png_bytes = blank_png_bytes
+                    if png_b64 and "," in png_b64:
+                        try:
+                            decoded = base64.b64decode(png_b64.split(",", 1)[1])
+                            if decoded.startswith(b"\x89PNG\r\n\x1a\n"):
+                                png_bytes = decoded
+                        except Exception:
+                            png_bytes = blank_png_bytes
+                    tmp_png.write_bytes(png_bytes)
+                    temp_files.append(tmp_png)
+                    cmd.extend(["-framerate", fps_expr, "-i", str(tmp_png)])
             elif c_kind == "image":
                 m_path = resolve_media_path(clip["mediaId"])
                 cmd.extend(["-framerate", fps_expr, "-i", str(m_path)])
@@ -1187,8 +1219,11 @@ def render_job_worker(job_id: str, payload: dict) -> None:
                 if not op_is_anim and opacity < 0.99:
                     chain.append(f"colorchannelmixer=aa={opacity:.3f}")
 
-            # For static images and title PNGs, expand frames BEFORE time-based keyframe animations
-            if c_kind in {"image", "title"} and not uses_zoompan:
+            # For static images and single-PNG titles, expand frames BEFORE time-based keyframe animations;
+            # animated title sequences already carry per-frame durations from ffconcat.
+            if has_anim_frames:
+                chain.append(f"fps={fps_expr},setpts=PTS-STARTPTS,settb={tb_expr}")
+            elif c_kind in {"image", "title"} and not uses_zoompan:
                 chain.append(f"loop=loop={max(0, total_frames - 1)}:size=1:start=0")
                 chain.append(f"setpts=N/(({fps_expr})*TB),fps={fps_expr},settb={tb_expr}")
 

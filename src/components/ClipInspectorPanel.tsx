@@ -64,6 +64,7 @@ interface ClipInspectorPanelProps {
   onSyncGradeToAssetClips?: (assetId: string, grade: ColorGradeConfig) => void;
   onAddAssetToTimeline?: (asset: MediaAsset) => void;
   onToggleBypassGrade: () => void;
+  expandedLayout?: boolean;
 }
 
 const SPEED_PRESETS = [0.5, 1.0, 1.5, 2.0];
@@ -91,6 +92,7 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
   onSyncGradeToAssetClips,
   onAddAssetToTimeline,
   onToggleBypassGrade,
+  expandedLayout = false,
 }) => {
   const [localTab, setLocalTab] = useState<'clip' | 'grade'>('clip');
   const [localScope, setLocalScope] = useState<'picture' | 'master'>('picture');
@@ -169,7 +171,11 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
     const syncAssetId = gradeTargetAsset?.id || (canGradeClip ? selectedClip?.mediaId : undefined);
 
     return (
-      <div className="w-full lg:w-[296px] shrink-0 flex flex-col bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg overflow-hidden shadow-xs dark:shadow-none">
+      <div
+        className={`w-full shrink-0 flex flex-col bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg overflow-hidden shadow-xs dark:shadow-none ${
+          expandedLayout ? 'lg:flex-1 min-w-0' : 'lg:w-[296px]'
+        }`}
+      >
         <PanelTabs tab={tab} onSelect={setTab} hasClip={Boolean(selectedClip)} />
 
         {/* Individual Picture vs Master Timeline Scope Switcher */}
@@ -285,7 +291,11 @@ export const ClipInspectorPanel: React.FC<ClipInspectorPanelProps> = ({
       selectedClip.effects.chromaKeyEnabled);
 
   return (
-    <aside className="w-full lg:w-[296px] shrink-0 flex flex-col bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg overflow-hidden shadow-xs dark:shadow-none">
+    <aside
+      className={`w-full shrink-0 flex flex-col bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg overflow-hidden shadow-xs dark:shadow-none ${
+        expandedLayout ? 'lg:flex-1 min-w-0' : 'lg:w-[296px]'
+      }`}
+    >
       <PanelTabs tab={tab} onSelect={setTab} hasClip={Boolean(selectedClip)} />
 
       {!selectedClip ? (

@@ -19,6 +19,7 @@ import {
   ExportConfig,
   ExportFps,
   MediaAsset,
+  PreviewClarityMode,
   RenderJobStatus,
   TimelineClip,
   TimelineTrack,
@@ -62,6 +63,11 @@ interface QuickRenderPageProps {
   onUploadFiles: (files: FileList | File[]) => void;
   onOpenTimelineMode: () => void;
   onAutoSelectQuickRender: (opts: QuickAutoSelectOptions, renderNow?: boolean) => void;
+  clarityMode?: PreviewClarityMode;
+  isPreviewDetached?: boolean;
+  extendedScreenCount?: number;
+  onClarityModeChange?: (mode: PreviewClarityMode) => void;
+  onDetachPreview?: () => void;
 }
 
 interface QuickPreset {
@@ -127,6 +133,11 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
   onUploadFiles,
   onOpenTimelineMode,
   onAutoSelectQuickRender,
+  clarityMode = 'hd',
+  isPreviewDetached = false,
+  extendedScreenCount = 1,
+  onClarityModeChange,
+  onDetachPreview,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const opacityCommittedRef = useRef(false);
@@ -715,34 +726,40 @@ export const QuickRenderPage: React.FC<QuickRenderPageProps> = ({
           ) : (
             <div className="flex-1 flex flex-col gap-3.5">
               {/* Live Audio + Transition + Opacity + Spectrum Preview Stage */}
-              <div className="h-[310px] sm:h-[360px] flex flex-col">
-                <PreviewCanvas
-                  tracks={tracks}
-                  clips={clips}
-                  assetsMap={assetsMap}
-                  selectedClipId={selectedClipId}
-                  colorGrade={colorGrade}
-                  bypassGrade={bypassGrade}
-                  resolution={exportConfig.resolution}
-                  fps={exportConfig.fps}
-                  playhead={playhead}
-                  isPlaying={isPlaying}
-                  masterMuted={masterMuted}
-                  normalizeAudio={Boolean(exportConfig.normalizeAudio)}
-                  normalizeTargetLufs={exportConfig.normalizeTargetLufs ?? -14}
-                  loadingSample={loadingSample}
-                  uploading={uploading}
-                  defaultShowSpectrum
-                  onPlayheadChange={onPlayheadChange}
-                  onSelectClip={onSelectClip}
-                  onUpdateClip={onUpdateClip}
-                  onCommitHistory={onCommitHistory}
-                  onTogglePlay={onTogglePlay}
-                  onToggleMute={onToggleMasterMute}
-                  onLoadSamplePack={onLoadSamplePack}
-                  onUploadFiles={onUploadFiles}
-                />
-              </div>
+              {!isPreviewDetached && (
+                <div className="h-[310px] sm:h-[360px] flex flex-col">
+                  <PreviewCanvas
+                    tracks={tracks}
+                    clips={clips}
+                    assetsMap={assetsMap}
+                    selectedClipId={selectedClipId}
+                    colorGrade={colorGrade}
+                    bypassGrade={bypassGrade}
+                    resolution={exportConfig.resolution}
+                    fps={exportConfig.fps}
+                    playhead={playhead}
+                    isPlaying={isPlaying}
+                    masterMuted={masterMuted}
+                    normalizeAudio={Boolean(exportConfig.normalizeAudio)}
+                    normalizeTargetLufs={exportConfig.normalizeTargetLufs ?? -14}
+                    loadingSample={loadingSample}
+                    uploading={uploading}
+                    defaultShowSpectrum
+                    clarityMode={clarityMode}
+                    extendedScreenCount={extendedScreenCount}
+                    onClarityModeChange={onClarityModeChange}
+                    onDetachPreview={onDetachPreview}
+                    onPlayheadChange={onPlayheadChange}
+                    onSelectClip={onSelectClip}
+                    onUpdateClip={onUpdateClip}
+                    onCommitHistory={onCommitHistory}
+                    onTogglePlay={onTogglePlay}
+                    onToggleMute={onToggleMasterMute}
+                    onLoadSamplePack={onLoadSamplePack}
+                    onUploadFiles={onUploadFiles}
+                  />
+                </div>
+              )}
 
               {/* Dedicated Scrubber Strip */}
               {totalDuration > 0 && (

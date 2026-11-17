@@ -12,6 +12,7 @@ import {
   Sparkles,
   Target,
   Trash2,
+  Type,
 } from 'lucide-react';
 import {
   DEFAULT_FUSION_VFX,
@@ -20,10 +21,47 @@ import {
   MediaAsset,
   ParticlePresetId,
   RotoscopePoint,
+  TITLE_FONT_OPTIONS,
   TimelineClip,
+  TitleMotionEasing,
+  TitleSpec,
+  TitleTemplateId,
+  TitleTextAnimation,
 } from '../types/editor';
 import { countClipKeyframes, evaluateAnimatedClipProps } from '../utils/timelineMath';
+import { drawVectorTitle } from '../utils/titleRenderer';
 import { KeyframeGraphEditor } from './KeyframeGraphEditor';
+import { MOTION_EASING_OPTIONS, TEXT_ANIMATION_OPTIONS } from './TitleStyleControls';
+
+const DEFAULT_FUSION_TITLE: TitleSpec = {
+  template: 'main_title',
+  heading: 'KINETIC TITLE',
+  subheading: 'MOTION GRAPHICS · FUSION',
+  bodyText: '',
+  textColor: '#ffffff',
+  accentColor: '#3b82f6',
+  bgColor: 'transparent',
+  fontFamily: 'Outfit',
+  fontSize: 1.05,
+  align: 'center',
+  fontWeight: 700,
+  letterSpacing: 1,
+  shadowBlur: 18,
+  shadowColor: '#000000',
+  animation: 'slide-up',
+  animDurationSec: 0.85,
+  animEasing: 'easeOut',
+  animOut: false,
+  morphAnimation: 'none',
+  morphPeakPct: 0.52,
+};
+
+const QUICK_ENTRANCE_PRESETS: { id: TitleTextAnimation; label: string }[] = [
+  { id: 'none', label: 'None' },
+  { id: 'fade-in', label: 'Fade In' },
+  { id: 'slide-up', label: 'Slide Up' },
+  { id: 'pop-in', label: 'Pop In' },
+];
 
 interface FusionVfxStudioProps {
   selectedClip: TimelineClip | null;
@@ -36,6 +74,7 @@ interface FusionVfxStudioProps {
   onUpdateClip: (id: string, patch: Partial<TimelineClip>) => void;
   onCommitHistory: () => void;
   onInsertBakedOverlay: (pngDataUrl: string, label: string, duration: number) => void;
+  onAddTitleClip?: (spec: TitleSpec, duration: number) => void;
 }
 
 type FusionNodeId =
@@ -101,6 +140,7 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
   onUpdateClip,
   onCommitHistory,
   onInsertBakedOverlay,
+  onAddTitleClip,
 }) => {
   const [nodes, setNodes] = useState<FusionGraphNode[]>(INITIAL_NODES);
   const [selectedNodeId, setSelectedNodeId] = useState<FusionNodeId>('Keyframes');
@@ -128,6 +168,16 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
     return null;
   }, [selectedClip, selectedClipAsset, targetClip, assetsMap]);
 
+  const [inspectorTab, setInspectorTab] = useState<'vfx' | 'title'>(
+    targetClip?.kind === 'title' ? 'title' : 'vfx',
+  );
+  const [draftTitle, setDraftTitle] = useState<TitleSpec>(
+    targetClip?.kind === 'title' && targetClip.title
+      ? { ...DEFAULT_FUSION_TITLE, ...targetClip.title }
+      : { ...DEFAULT_FUSION_TITLE },
+  );
+  const [draftTitleDur, setDraftTitleDur] = useState<number>(4.0);
+
   const [localSpec, setLocalSpec] = useState<FusionVfxSpec>(
     targetClip?.fusion
       ? { ...targetClip.fusion }
@@ -145,8 +195,9 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
   const particlesRef = useRef<Particle3D[]>([]);
   const timeRef = useRef<number>(0);
   const specCommittedRef = useRef<boolean>(false);
+  const titleCommittedRef = useRef<boolean>(false);
 
-  // Sync inspector with newly selected clip's Fusion settings
+  // Sync inspector with newly selected clip's Fusion & Title settings
   useEffect(() => {
     if (targetClip?.fusion) {
       setLocalSpec({
@@ -161,6 +212,10 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
         krokodoveEffect: 'hud_rings',
         rotoscopePoints: [],
       });
+    }
+    if (targetClip?.kind === 'title' && targetClip.title) {
+      setDraftTitle({ ...DEFAULT_FUSION_TITLE, ...targetClip.title });
+      setInspectorTab('title');
     }
     setTrackResults([]);
   }, [targetClip?.id]);
@@ -220,6 +275,39 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
 
   const resetSpecGesture = () => {
     specCommittedRef.current = false;
+  };
+
+  const activeTitleSpec: TitleSpec =
+    targetClip?.kind === 'title' && targetClip.title ? targetClip.title : draftTitle;
+  const activeTitleDuration =
+    targetClip?.kind === 'title' ? Math.max(0.5, targetClip.duration) : Math.max(0.5, draftTitleDur);
+
+  const patchTitle = (patch: Partial<TitleSpec>, commitDiscrete = false) => {
+    if (commitDiscrete && targetClip?.kind === 'title') {
+      onCommitHistory();
+    }
+    const next = { ...activeTitleSpec, ...patch };
+    setDraftTitle(next);
+    if (targetClip?.kind === 'title') {
+      onUpdateClip(targetClip.id, { title: next });
+    }
+  };
+
+  const patchTitleSlider = (patch: Partial<TitleSpec>) => {
+    if (!titleCommittedRef.current && targetClip?.kind === 'title') {
+      onCommitHistory();
+      titleCommittedRef.current = true;
+    }
+    patchTitle(patch, false);
+  };
+
+  const resetTitleGesture = () => {
+    titleCommittedRef.current = false;
+  };
+
+  const replayTitleEntrance = () => {
+    timeRef.current = 0;
+    setSimPlaying(true);
   };
 
   // Seed / resize 3D particle pool
@@ -419,6 +507,16 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
             ctx.restore();
           }
 
+          // Vector Title & Kinetic Motion Overlay (when editing title clip or Title Editor tab is active)
+          if (targetClip?.kind === 'title' || inspectorTab === 'title') {
+            const cycleDur = Math.max(1.6, activeTitleDuration);
+            const clipProg = targetClip
+              ? Math.max(0, Math.min(1, (playhead - targetClip.startTime) / Math.max(0.1, targetClip.duration)))
+              : 0.5;
+            const titleProg = simPlaying ? (timeRef.current % cycleDur) / cycleDur : clipProg;
+            drawVectorTitle(ctx, activeTitleSpec, w, h, titleProg, cycleDur);
+          }
+
           // Camera Tracker Reticle in Tracker Mode
           if (viewportMode === 'tracker') {
             const tx = trackAnchor.x * w;
@@ -443,7 +541,19 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
 
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [effectiveSpec, simPlaying, playhead, cameraYaw, cameraPitch, viewportMode, trackAnchor, targetClip]);
+  }, [
+    effectiveSpec,
+    simPlaying,
+    playhead,
+    cameraYaw,
+    cameraPitch,
+    viewportMode,
+    trackAnchor,
+    targetClip,
+    inspectorTab,
+    activeTitleSpec,
+    activeTitleDuration,
+  ]);
 
   const toggleNodeBypass = (id: FusionNodeId) => {
     setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, bypassed: !n.bypassed } : n)));
@@ -758,241 +868,521 @@ export const FusionVfxStudio: React.FC<FusionVfxStudioProps> = ({
         </div>
       </div>
 
-      {/* Right Column: Selected Node Parameter Inspector */}
-      <aside className="w-full lg:w-[300px] shrink-0 bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg flex flex-col overflow-hidden text-xs shadow-xs dark:shadow-none">
-        <div className="px-3.5 py-2 border-b border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#171b22] flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <Sliders className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-            <span className="font-semibold text-slate-900 dark:text-slate-100">{selectedNode.label}</span>
-          </div>
-          <span className="text-[10px] text-slate-500 dark:text-slate-400">{selectedNode.subtitle}</span>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-3.5 space-y-4">
-          {/* 3D Particle System Controls */}
-          <section className="space-y-2 pb-3 border-b border-slate-200 dark:border-[#232832]">
-            <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">3D Particle System (pEmitter3D)</p>
-            <div className="grid grid-cols-5 gap-1">
-              {(
-                [
-                  ['none', 'Off'],
-                  ['embers', 'Ember'],
-                  ['snow', 'Snow'],
-                  ['stardust', 'Dust'],
-                  ['sparks', 'Sparks'],
-                ] as [ParticlePresetId, string][]
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => patchSpec({ particlePreset: id }, true)}
-                  className={`py-1 rounded text-[10px] font-medium border cursor-pointer ${
-                    localSpec.particlePreset === id
-                      ? 'bg-blue-600 border-blue-500 text-white'
-                      : 'bg-slate-50 dark:bg-[#0e1116] border-slate-300 dark:border-[#252b37] text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <label className="flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-400">
-              <span>Particle Density ({localSpec.particleDensity})</span>
-              <input
-                type="range"
-                min={10}
-                max={120}
-                step={5}
-                value={localSpec.particleDensity}
-                onChange={(e) => patchSpecSlider({ particleDensity: Number(e.target.value) })}
-                onPointerUp={resetSpecGesture}
-                onPointerCancel={resetSpecGesture}
-                onBlur={resetSpecGesture}
-                className="studio-slider w-28"
-              />
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <label className="space-y-1 text-[10px] text-slate-600 dark:text-slate-400">
-                <span>Camera Yaw ({cameraYaw}°)</span>
-                <input
-                  type="range"
-                  min={-45}
-                  max={45}
-                  value={cameraYaw}
-                  onChange={(e) => setCameraYaw(Number(e.target.value))}
-                  className="studio-slider w-full"
-                />
-              </label>
-              <label className="space-y-1 text-[10px] text-slate-600 dark:text-slate-400">
-                <span>Camera Pitch ({cameraPitch}°)</span>
-                <input
-                  type="range"
-                  min={-35}
-                  max={35}
-                  value={cameraPitch}
-                  onChange={(e) => setCameraPitch(Number(e.target.value))}
-                  className="studio-slider w-full"
-                />
-              </label>
-            </div>
-            <label className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400">
-              <span>Emitter Tint</span>
-              <input
-                type="color"
-                value={localSpec.particleColor}
-                onChange={(e) => patchSpecSlider({ particleColor: e.target.value })}
-                onBlur={resetSpecGesture}
-                className="w-8 h-6 rounded bg-transparent border border-slate-300 dark:border-[#2d3544] cursor-pointer"
-              />
-            </label>
-          </section>
-
-          {/* Krokodove Motion Graphic Toolset */}
-          <section className="space-y-2 pb-3 border-b border-slate-200 dark:border-[#232832]">
-            <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">Krokodove Motion Graphic Toolset</p>
-            <select
-              value={localSpec.krokodoveEffect}
-              onChange={(e) => patchSpec({ krokodoveEffect: e.target.value as KrokodoveEffectId }, true)}
-              className="w-full h-8 px-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 text-[11px]"
-            >
-              <option value="none">None (Bypass Krokodove)</option>
-              <option value="hud_rings">Krokodove · Telemetry HUD Rings</option>
-              <option value="kaleido_array">Krokodove · Shape Array Radial</option>
-              <option value="glitch_slice">Krokodove · Vector Glitch Slice</option>
-              <option value="extrude_grid">Krokodove · 3D Extruded Perspective Grid</option>
-            </select>
-            <label className="flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-400">
-              <span>Intensity ({Math.round(localSpec.krokodoveIntensity * 100)}%)</span>
-              <input
-                type="range"
-                min={0.1}
-                max={1}
-                step={0.05}
-                value={localSpec.krokodoveIntensity}
-                onChange={(e) => patchSpecSlider({ krokodoveIntensity: Number(e.target.value) })}
-                onPointerUp={resetSpecGesture}
-                onPointerCancel={resetSpecGesture}
-                onBlur={resetSpecGesture}
-                className="studio-slider w-28"
-              />
-            </label>
-            <label className="flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-400">
-              <span>Optical Glow ({Math.round(localSpec.glowAmount * 100)}%)</span>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={localSpec.glowAmount}
-                onChange={(e) => patchSpecSlider({ glowAmount: Number(e.target.value) })}
-                onPointerUp={resetSpecGesture}
-                onPointerCancel={resetSpecGesture}
-                onBlur={resetSpecGesture}
-                className="studio-slider w-28"
-              />
-            </label>
-          </section>
-
-          {/* Rotoscoping Spline Matte */}
-          <section className="space-y-2 pb-3 border-b border-slate-200 dark:border-[#232832]">
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">Rotoscoping Matte</p>
-              <button
-                type="button"
-                onClick={() => setViewportMode('roto')}
-                className="text-[10px] text-amber-600 hover:text-amber-700 dark:text-amber-300 dark:hover:text-amber-200 cursor-pointer"
-              >
-                Edit Points on View
-              </button>
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="flex items-center gap-1.5 text-[11px] text-slate-700 dark:text-slate-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={localSpec.rotoscopeEnabled}
-                  onChange={(e) => patchSpec({ rotoscopeEnabled: e.target.checked }, true)}
-                />
-                <span>Enable Matte</span>
-              </label>
-              <label className="flex items-center gap-1.5 text-[11px] text-slate-700 dark:text-slate-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={localSpec.rotoscopeInvert}
-                  onChange={(e) => patchSpec({ rotoscopeInvert: e.target.checked }, true)}
-                />
-                <span>Invert</span>
-              </label>
-              {localSpec.rotoscopePoints.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => patchSpec({ rotoscopePoints: [], rotoscopeEnabled: false }, true)}
-                  className="ml-auto text-[10px] text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 flex items-center gap-0.5 cursor-pointer"
-                >
-                  <Trash2 className="w-3 h-3" />
-                  <span>Clear</span>
-                </button>
-              )}
-            </div>
-          </section>
-
-          {/* Camera & Point Tracker */}
-          <section className="space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">Planar / Point Tracker</p>
-              <button
-                type="button"
-                onClick={() => {
-                  setViewportMode('tracker');
-                  handleRunCameraTrack();
-                }}
-                className="px-2 py-1 rounded bg-sky-50 dark:bg-sky-600/20 border border-sky-400/70 dark:border-sky-500/60 text-[10px] font-medium text-sky-700 dark:text-sky-200 hover:bg-sky-100 dark:hover:bg-sky-600/35 flex items-center gap-1 cursor-pointer"
-              >
-                <Target className="w-3 h-3" />
-                <span>Track Forward</span>
-              </button>
-            </div>
-            {trackResults.length > 0 && (
-              <div className="bg-slate-50 dark:bg-[#0d1016] border border-slate-200 dark:border-[#232832] rounded p-2 space-y-1 font-mono-tabular text-[10px]">
-                <div className="flex justify-between text-slate-600 dark:text-slate-400">
-                  <span>Solve Offset</span>
-                  <span className="text-sky-600 dark:text-sky-300">
-                    dx {localSpec.trackOffsetX}% · dy {localSpec.trackOffsetY}%
-                  </span>
-                </div>
-                <div className="grid grid-cols-4 gap-1 text-[9px] text-slate-500">
-                  {trackResults.slice(0, 4).map((r) => (
-                    <span key={r.frame}>
-                      f{r.frame}:{r.dx},{r.dy}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </section>
-        </div>
-
-        {/* Apply / Bake Actions */}
-        <div className="p-3 border-t border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#11141a] space-y-1.5 shrink-0">
-          {targetClip && (
+      {/* Right Column: Selected Node Parameter Inspector | Title Editor + Motion Settings */}
+      <aside className="w-full lg:w-[310px] shrink-0 bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg flex flex-col overflow-hidden text-xs shadow-xs dark:shadow-none">
+        <div className="px-2.5 py-2 border-b border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#171b22] space-y-2">
+          <div className="grid grid-cols-2 gap-1 p-0.5 rounded-md bg-slate-200/70 dark:bg-[#0e1116] border border-slate-300/70 dark:border-[#252b37]">
             <button
               type="button"
-              onClick={() => {
-                onCommitHistory();
-                onUpdateClip(targetClip.id, { fusion: { ...localSpec, enabled: true } });
-              }}
-              className="w-full py-1.5 px-3 rounded bg-white hover:bg-slate-100 dark:bg-[#1d222b] dark:hover:bg-[#262d39] border border-slate-300 dark:border-[#2c3442] text-slate-800 dark:text-slate-100 text-[11px] font-medium cursor-pointer truncate"
+              onClick={() => setInspectorTab('vfx')}
+              className={`py-1 px-2 rounded text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                inspectorTab === 'vfx'
+                  ? 'bg-white dark:bg-[#1c222d] text-slate-950 dark:text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
             >
-              Lock VFX to “{targetClip.name}”
+              <Sliders className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+              <span>VFX Nodes</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setInspectorTab('title')}
+              className={`py-1 px-2 rounded text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                inspectorTab === 'title'
+                  ? 'bg-white dark:bg-[#1c222d] text-slate-950 dark:text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              <Type className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+              <span>Title Editor</span>
+            </button>
+          </div>
+          {inspectorTab === 'vfx' ? (
+            <div className="flex items-center justify-between px-1">
+              <span className="font-semibold text-[11px] text-slate-900 dark:text-slate-100">{selectedNode.label}</span>
+              <span className="text-[10px] text-slate-500 dark:text-slate-400">{selectedNode.subtitle}</span>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between px-1">
+              <span className="font-semibold text-[11px] text-slate-900 dark:text-slate-100 truncate">
+                {targetClip?.kind === 'title' ? `Editing: ${targetClip.name}` : 'Motion Title Composer'}
+              </span>
+              <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium shrink-0">
+                {targetClip?.kind === 'title' ? 'Live Clip' : 'Draft'}
+              </span>
+            </div>
           )}
-          <button
-            type="button"
-            onClick={handleBakeOverlay}
-            className="w-full py-1.5 px-3 rounded bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Bake MotionFX Layer to Timeline</span>
-          </button>
+        </div>
+
+        {inspectorTab === 'vfx' ? (
+          <div className="flex-1 overflow-y-auto p-3.5 space-y-4">
+            {/* 3D Particle System Controls */}
+            <section className="space-y-2 pb-3 border-b border-slate-200 dark:border-[#232832]">
+              <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">3D Particle System (pEmitter3D)</p>
+              <div className="grid grid-cols-5 gap-1">
+                {(
+                  [
+                    ['none', 'Off'],
+                    ['embers', 'Ember'],
+                    ['snow', 'Snow'],
+                    ['stardust', 'Dust'],
+                    ['sparks', 'Sparks'],
+                  ] as [ParticlePresetId, string][]
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => patchSpec({ particlePreset: id }, true)}
+                    className={`py-1 rounded text-[10px] font-medium border cursor-pointer ${
+                      localSpec.particlePreset === id
+                        ? 'bg-blue-600 border-blue-500 text-white'
+                        : 'bg-slate-50 dark:bg-[#0e1116] border-slate-300 dark:border-[#252b37] text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <label className="flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-400">
+                <span>Particle Density ({localSpec.particleDensity})</span>
+                <input
+                  type="range"
+                  min={10}
+                  max={120}
+                  step={5}
+                  value={localSpec.particleDensity}
+                  onChange={(e) => patchSpecSlider({ particleDensity: Number(e.target.value) })}
+                  onPointerUp={resetSpecGesture}
+                  onPointerCancel={resetSpecGesture}
+                  onBlur={resetSpecGesture}
+                  className="studio-slider w-28"
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="space-y-1 text-[10px] text-slate-600 dark:text-slate-400">
+                  <span>Camera Yaw ({cameraYaw}°)</span>
+                  <input
+                    type="range"
+                    min={-45}
+                    max={45}
+                    value={cameraYaw}
+                    onChange={(e) => setCameraYaw(Number(e.target.value))}
+                    className="studio-slider w-full"
+                  />
+                </label>
+                <label className="space-y-1 text-[10px] text-slate-600 dark:text-slate-400">
+                  <span>Camera Pitch ({cameraPitch}°)</span>
+                  <input
+                    type="range"
+                    min={-35}
+                    max={35}
+                    value={cameraPitch}
+                    onChange={(e) => setCameraPitch(Number(e.target.value))}
+                    className="studio-slider w-full"
+                  />
+                </label>
+              </div>
+              <label className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400">
+                <span>Emitter Tint</span>
+                <input
+                  type="color"
+                  value={localSpec.particleColor}
+                  onChange={(e) => patchSpecSlider({ particleColor: e.target.value })}
+                  onBlur={resetSpecGesture}
+                  className="w-8 h-6 rounded bg-transparent border border-slate-300 dark:border-[#2d3544] cursor-pointer"
+                />
+              </label>
+            </section>
+
+            {/* Krokodove Motion Graphic Toolset */}
+            <section className="space-y-2 pb-3 border-b border-slate-200 dark:border-[#232832]">
+              <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">Krokodove Motion Graphic Toolset</p>
+              <select
+                value={localSpec.krokodoveEffect}
+                onChange={(e) => patchSpec({ krokodoveEffect: e.target.value as KrokodoveEffectId }, true)}
+                className="w-full h-8 px-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 text-[11px]"
+              >
+                <option value="none">None (Bypass Krokodove)</option>
+                <option value="hud_rings">Krokodove · Telemetry HUD Rings</option>
+                <option value="kaleido_array">Krokodove · Shape Array Radial</option>
+                <option value="glitch_slice">Krokodove · Vector Glitch Slice</option>
+                <option value="extrude_grid">Krokodove · 3D Extruded Perspective Grid</option>
+              </select>
+              <label className="flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-400">
+                <span>Intensity ({Math.round(localSpec.krokodoveIntensity * 100)}%)</span>
+                <input
+                  type="range"
+                  min={0.1}
+                  max={1}
+                  step={0.05}
+                  value={localSpec.krokodoveIntensity}
+                  onChange={(e) => patchSpecSlider({ krokodoveIntensity: Number(e.target.value) })}
+                  onPointerUp={resetSpecGesture}
+                  onPointerCancel={resetSpecGesture}
+                  onBlur={resetSpecGesture}
+                  className="studio-slider w-28"
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-400">
+                <span>Optical Glow ({Math.round(localSpec.glowAmount * 100)}%)</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={localSpec.glowAmount}
+                  onChange={(e) => patchSpecSlider({ glowAmount: Number(e.target.value) })}
+                  onPointerUp={resetSpecGesture}
+                  onPointerCancel={resetSpecGesture}
+                  onBlur={resetSpecGesture}
+                  className="studio-slider w-28"
+                />
+              </label>
+            </section>
+
+            {/* Rotoscoping Spline Matte */}
+            <section className="space-y-2 pb-3 border-b border-slate-200 dark:border-[#232832]">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">Rotoscoping Matte</p>
+                <button
+                  type="button"
+                  onClick={() => setViewportMode('roto')}
+                  className="text-[10px] text-amber-600 hover:text-amber-700 dark:text-amber-300 dark:hover:text-amber-200 cursor-pointer"
+                >
+                  Edit Points on View
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1.5 text-[11px] text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={localSpec.rotoscopeEnabled}
+                    onChange={(e) => patchSpec({ rotoscopeEnabled: e.target.checked }, true)}
+                  />
+                  <span>Enable Matte</span>
+                </label>
+                <label className="flex items-center gap-1.5 text-[11px] text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={localSpec.rotoscopeInvert}
+                    onChange={(e) => patchSpec({ rotoscopeInvert: e.target.checked }, true)}
+                  />
+                  <span>Invert</span>
+                </label>
+                {localSpec.rotoscopePoints.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => patchSpec({ rotoscopePoints: [], rotoscopeEnabled: false }, true)}
+                    className="ml-auto text-[10px] text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Clear</span>
+                  </button>
+                )}
+              </div>
+            </section>
+
+            {/* Camera & Point Tracker */}
+            <section className="space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">Planar / Point Tracker</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewportMode('tracker');
+                    handleRunCameraTrack();
+                  }}
+                  className="px-2 py-1 rounded bg-sky-50 dark:bg-sky-600/20 border border-sky-400/70 dark:border-sky-500/60 text-[10px] font-medium text-sky-700 dark:text-sky-200 hover:bg-sky-100 dark:hover:bg-sky-600/35 flex items-center gap-1 cursor-pointer"
+                >
+                  <Target className="w-3 h-3" />
+                  <span>Track Forward</span>
+                </button>
+              </div>
+              {trackResults.length > 0 && (
+                <div className="bg-slate-50 dark:bg-[#0d1016] border border-slate-200 dark:border-[#232832] rounded p-2 space-y-1 font-mono-tabular text-[10px]">
+                  <div className="flex justify-between text-slate-600 dark:text-slate-400">
+                    <span>Solve Offset</span>
+                    <span className="text-sky-600 dark:text-sky-300">
+                      dx {localSpec.trackOffsetX}% · dy {localSpec.trackOffsetY}%
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1 text-[9px] text-slate-500">
+                    {trackResults.slice(0, 4).map((r) => (
+                      <span key={r.frame}>
+                        f{r.frame}:{r.dx},{r.dy}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto p-3.5 space-y-3.5">
+            {/* Title Text & Typography */}
+            <section className="space-y-2 pb-3 border-b border-slate-200 dark:border-[#232832]">
+              <p className="text-[11px] font-semibold text-slate-800 dark:text-slate-200">Title Content & Style</p>
+              <label className="block space-y-1">
+                <span className="text-[10px] text-slate-500 dark:text-slate-400">Headline</span>
+                <input
+                  type="text"
+                  value={activeTitleSpec.heading}
+                  onFocus={() => {
+                    if (targetClip?.kind === 'title') onCommitHistory();
+                  }}
+                  onChange={(e) => patchTitle({ heading: e.target.value }, false)}
+                  className="w-full h-8 px-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 text-xs focus:outline-none focus:border-blue-500"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-[10px] text-slate-500 dark:text-slate-400">Subheading</span>
+                <input
+                  type="text"
+                  value={activeTitleSpec.subheading}
+                  onFocus={() => {
+                    if (targetClip?.kind === 'title') onCommitHistory();
+                  }}
+                  onChange={(e) => patchTitle({ subheading: e.target.value }, false)}
+                  className="w-full h-8 px-2 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 text-xs focus:outline-none focus:border-blue-500"
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="space-y-1">
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400">Template</span>
+                  <select
+                    value={activeTitleSpec.template}
+                    onChange={(e) => patchTitle({ template: e.target.value as TitleTemplateId }, true)}
+                    className="w-full h-7 px-1.5 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 text-[11px]"
+                  >
+                    <option value="main_title">Main Title</option>
+                    <option value="lower_third">Lower Third</option>
+                    <option value="subtitle">Subtitle Card</option>
+                    <option value="vector_badge">Vector Badge</option>
+                    <option value="scrolling_credits">Scrolling Credits</option>
+                  </select>
+                </label>
+                <label className="space-y-1">
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400">Font Family</span>
+                  <select
+                    value={activeTitleSpec.fontFamily}
+                    onChange={(e) => patchTitle({ fontFamily: e.target.value }, true)}
+                    className="w-full h-7 px-1.5 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 text-[11px]"
+                  >
+                    {TITLE_FONT_OPTIONS.map((f) => (
+                      <option key={f.value} value={f.value}>
+                        {f.value}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="grid grid-cols-2 gap-2 pt-0.5">
+                <label className="flex items-center justify-between px-2 py-1 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-200 dark:border-[#232832] text-[10px] text-slate-600 dark:text-slate-400">
+                  <span>Text</span>
+                  <input
+                    type="color"
+                    value={activeTitleSpec.textColor.startsWith('#') ? activeTitleSpec.textColor : '#ffffff'}
+                    onChange={(e) => patchTitleSlider({ textColor: e.target.value })}
+                    onBlur={resetTitleGesture}
+                    className="w-6 h-5 rounded bg-transparent border-0 cursor-pointer"
+                  />
+                </label>
+                <label className="flex items-center justify-between px-2 py-1 rounded bg-slate-50 dark:bg-[#0e1116] border border-slate-200 dark:border-[#232832] text-[10px] text-slate-600 dark:text-slate-400">
+                  <span>Accent</span>
+                  <input
+                    type="color"
+                    value={activeTitleSpec.accentColor.startsWith('#') ? activeTitleSpec.accentColor : '#3b82f6'}
+                    onChange={(e) => patchTitleSlider({ accentColor: e.target.value })}
+                    onBlur={resetTitleGesture}
+                    className="w-6 h-5 rounded bg-transparent border-0 cursor-pointer"
+                  />
+                </label>
+              </div>
+            </section>
+
+            {/* Motion Settings Sub-Panel */}
+            <section
+              aria-label="Motion Settings"
+              className="rounded-lg border border-slate-200 dark:border-[#273040] bg-slate-50 dark:bg-[#0e1116] p-2.5 space-y-2.5"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  <p className="text-[11px] font-semibold text-slate-900 dark:text-slate-100">Motion Settings</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={replayTitleEntrance}
+                  className="px-2 py-0.5 rounded bg-white dark:bg-[#171c25] border border-slate-300 dark:border-[#2c3442] text-[10px] font-medium text-slate-700 dark:text-slate-200 hover:border-blue-500 flex items-center gap-1 cursor-pointer"
+                >
+                  <RotateCcw className="w-2.5 h-2.5" />
+                  <span>Replay</span>
+                </button>
+              </div>
+
+              {/* Predefined Entrance Animation Presets */}
+              <div className="space-y-1.5">
+                <span className="text-[10px] text-slate-500 dark:text-slate-400 block">Entrance Animation</span>
+                <div className="grid grid-cols-4 gap-1">
+                  {QUICK_ENTRANCE_PRESETS.map((preset) => {
+                    const active = (activeTitleSpec.animation || 'none') === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => {
+                          patchTitle({ animation: preset.id }, true);
+                          replayTitleEntrance();
+                        }}
+                        className={`py-1 px-1 rounded text-[10px] font-medium border transition-colors cursor-pointer ${
+                          active
+                            ? 'bg-blue-600 border-blue-500 text-white'
+                            : 'bg-white dark:bg-[#141820] border-slate-300 dark:border-[#262d3b] text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <select
+                  aria-label="All Entrance Presets"
+                  value={activeTitleSpec.animation || 'none'}
+                  onChange={(e) => {
+                    patchTitle({ animation: e.target.value as TitleTextAnimation }, true);
+                    replayTitleEntrance();
+                  }}
+                  className="w-full h-7 px-2 rounded bg-white dark:bg-[#141820] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 text-[11px] focus:outline-none focus:border-blue-500"
+                >
+                  {TEXT_ANIMATION_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Controllable Duration */}
+              <label className="block space-y-1">
+                <div className="flex items-center justify-between text-[10px] text-slate-600 dark:text-slate-400">
+                  <span>Entrance Duration</span>
+                  <span className="font-mono-tabular font-semibold text-slate-900 dark:text-slate-200">
+                    {(activeTitleSpec.animDurationSec ?? 0.85).toFixed(2)}s
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0.2}
+                  max={3.0}
+                  step={0.05}
+                  value={activeTitleSpec.animDurationSec ?? 0.85}
+                  onChange={(e) => patchTitleSlider({ animDurationSec: Number(e.target.value) })}
+                  onPointerUp={resetTitleGesture}
+                  onPointerCancel={resetTitleGesture}
+                  onBlur={resetTitleGesture}
+                  className="studio-slider w-full"
+                />
+              </label>
+
+              {/* Controllable Easing */}
+              <label className="block space-y-1">
+                <span className="text-[10px] text-slate-500 dark:text-slate-400">Easing Curve</span>
+                <select
+                  value={activeTitleSpec.animEasing || 'easeOut'}
+                  onChange={(e) => {
+                    patchTitle({ animEasing: e.target.value as TitleMotionEasing }, true);
+                    replayTitleEntrance();
+                  }}
+                  className="w-full h-7 px-2 rounded bg-white dark:bg-[#141820] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 text-[11px] focus:outline-none focus:border-blue-500"
+                >
+                  {MOTION_EASING_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {/* Exit Toggle */}
+              <label className="flex items-center justify-between gap-2 px-2 py-1.5 rounded bg-white dark:bg-[#141820] border border-slate-200 dark:border-[#262d3b] text-[11px] text-slate-700 dark:text-slate-300 cursor-pointer">
+                <span>Animate Exit Out</span>
+                <input
+                  type="checkbox"
+                  checked={Boolean(activeTitleSpec.animOut)}
+                  onChange={(e) => patchTitle({ animOut: e.target.checked }, true)}
+                  className="accent-blue-600"
+                />
+              </label>
+            </section>
+          </div>
+        )}
+
+        {/* Apply / Bake / Insert Actions */}
+        <div className="p-3 border-t border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#11141a] space-y-1.5 shrink-0">
+          {inspectorTab === 'vfx' ? (
+            <>
+              {targetClip && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onCommitHistory();
+                    onUpdateClip(targetClip.id, { fusion: { ...localSpec, enabled: true } });
+                  }}
+                  className="w-full py-1.5 px-3 rounded bg-white hover:bg-slate-100 dark:bg-[#1d222b] dark:hover:bg-[#262d39] border border-slate-300 dark:border-[#2c3442] text-slate-800 dark:text-slate-100 text-[11px] font-medium cursor-pointer truncate"
+                >
+                  Lock VFX to “{targetClip.name}”
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleBakeOverlay}
+                className="w-full py-1.5 px-3 rounded bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Bake MotionFX Layer to Timeline</span>
+              </button>
+            </>
+          ) : (
+            <>
+              {targetClip?.kind === 'title' ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onCommitHistory();
+                    onUpdateClip(targetClip.id, { title: { ...activeTitleSpec } });
+                  }}
+                  className="w-full py-1.5 px-3 rounded bg-white hover:bg-slate-100 dark:bg-[#1d222b] dark:hover:bg-[#262d39] border border-slate-300 dark:border-[#2c3442] text-slate-800 dark:text-slate-100 text-[11px] font-medium cursor-pointer truncate"
+                >
+                  Save Motion Title to “{targetClip.name}”
+                </button>
+              ) : (
+                <label className="flex items-center justify-between text-[10px] text-slate-600 dark:text-slate-400 px-0.5">
+                  <span>Clip Duration (s)</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    step={0.5}
+                    value={draftTitleDur}
+                    onChange={(e) => setDraftTitleDur(Math.max(1, Math.min(30, Number(e.target.value) || 4)))}
+                    className="w-16 h-6 px-1.5 rounded bg-white dark:bg-[#0e1116] border border-slate-300 dark:border-[#2a303d] text-slate-900 dark:text-slate-100 font-mono-tabular text-[11px] text-right"
+                  />
+                </label>
+              )}
+              {onAddTitleClip && (
+                <button
+                  type="button"
+                  onClick={() => onAddTitleClip({ ...activeTitleSpec }, draftTitleDur)}
+                  className="w-full py-1.5 px-3 rounded bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>
+                    {targetClip?.kind === 'title' ? 'Duplicate Title at Playhead' : 'Insert Motion Title at Playhead'}
+                  </span>
+                </button>
+              )}
+            </>
+          )}
         </div>
       </aside>
     </div>

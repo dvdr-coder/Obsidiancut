@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, Check, Download, FolderOpen, Loader2, Moon, Save, Sun, Trash2 } from 'lucide-react';
+import { BookOpen, Check, Download, FolderOpen, Loader2, Monitor, MonitorCheck, Moon, PanelRightOpen, Save, Sun, Trash2 } from 'lucide-react';
 import obsidianLogo from './assets/images/obsidian_cut_logo_1794556840933.jpg';
 import { AutoModeBar } from './components/AutoModeBar';
 import { ClipInspectorPanel } from './components/ClipInspectorPanel';
@@ -15,13 +15,22 @@ import { TransitionLibraryPanel } from './components/TransitionLibraryPanel';
 import { TutorialModal } from './components/TutorialModal';
 import { downloadRenderedVideo } from './utils/downloadFile';
 import {
+  broadcastDualSnapshot,
+  detectExtendedScreens,
+  isBrowserMultiScreenExtended,
+  openDetachedPreviewPopup,
+  subscribeDualChannel,
+} from './utils/dualScreenSync';
+import {
   ColorGradeConfig,
   DEFAULT_COLOR_GRADE,
   DEFAULT_TRACK_AUDIO_DSP,
   ExportConfig,
   MediaAsset,
   NestedSequence,
+  PreviewClarityMode,
   RenderJobStatus,
+  ScreenMonitorInfo,
   TimelineClip,
   TimelineTrack,
   TitleSpec,
@@ -51,7 +60,7 @@ import {
   splitClipAtTime,
   uid,
 } from './utils/timelineMath';
-import { renderTitleToExportPng } from './utils/titleRenderer';
+import { renderTitleExportAssets } from './utils/titleRenderer';
 
 type EditorMode = 'auto' | 'manual' | 'advanced' | 'quickrender';
 type AdvancedSubTab = 'fusion' | 'fairlight' | 'multimaster' | 'transitions';
@@ -111,6 +120,22 @@ export default function App() {
   const [renderJob, setRenderJob] = useState<RenderJobStatus | null>(null);
   const autoDownloadedJobRef = useRef<string | null>(null);
 
+  const [clarityMode, setClarityMode] = useState<PreviewClarityMode>(() => {
+    try {
+      const saved = localStorage.getItem('obsidiancut_clarity_mode');
+      if (saved === 'standard' || saved === 'hd' || saved === 'ultra') return saved;
+    } catch {
+      // ignore
+    }
+    return 'hd';
+  });
+  const [isPreviewDetached, setIsPreviewDetached] = useState<boolean>(false);
+  const [extendedScreens, setExtendedScreens] = useState<ScreenMonitorInfo[]>([]);
+  const [isExtendedScreenDetected, setIsExtendedScreenDetected] = useState<boolean>(() =>
+    isBrowserMultiScreenExtended(),
+  );
+  const detachedWinRef = useRef<Window | null>(null);
+
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     try {
@@ -119,6 +144,24 @@ export default function App() {
       // ignore
     }
   }, [theme]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('obsidiancut_clarity_mode', clarityMode);
+    } catch {
+      // ignore
+    }
+  }, [clarityMode]);
+
+  useEffect(() => {
+    const scr = window.screen as Screen & {
+      addEventListener?: (type: string, fn: () => void) => void;
+      removeEventListener?: (type: string, fn: () => void) => void;
+    };
+    const onScreenChange = () => setIsExtendedScreenDetected(isBrowserMultiScreenExtended());
+    scr?.addEventListener?.('change', onScreenChange);
+    return () => scr?.removeEventListener?.('change', onScreenChange);
+  }, []);
 
   const [uploading, setUploading] = useState<boolean>(false);
   const [loadingSample, setLoadingSample] = useState<boolean>(false);
@@ -229,6 +272,137 @@ export default function App() {
     () => (gradeTargetAssetId ? assetsMap.get(gradeTargetAssetId) || null : null),
     [gradeTargetAssetId, assetsMap],
   );
+
+  // Sync workspace state to any open Extended / Detached Preview Window
+  const totalDurationRef = useRef(totalDuration);
+  totalDurationRef.current = totalDuration;
+  const lastBroadcastTimeRef = useRef(0);
+
+  const pushDualDisplaySnapshot = (forceImmediate = false) => {
+    const now = performance.now();
+    if (!forceImmediate && isPlaying && now - lastBroadcastTimeRef.current < 160) {
+      return;
+    }
+    lastBroadcastTimeRef.current = now;
+    broadcastDualSnapshot({
+      tracks,
+      clips,
+      assets,
+      colorGrade,
+      bypassGrade,
+      resolution: exportConfig.resolution,
+      fps: exportConfig.fps,
+      playhead,
+      isPlaying,
+      masterMuted,
+      normalizeAudio: Boolean(exportConfig.normalizeAudio),
+      normalizeTargetLufs: exportConfig.normalizeTargetLufs ?? -14,
+      clarityMode,
+      theme,
+      timestamp: Date.now(),
+    });
+  };
+
+  useEffect(() => {
+    if (!isPreviewDetached) return;
+    pushDualDisplaySnapshot(false);
+  }, [
+    isPreviewDetached,
+    tracks,
+    clips,
+    assets,
+    colorGrade,
+    bypassGrade,
+    exportConfig.resolution,
+    exportConfig.fps,
+    exportConfig.normalizeAudio,
+    exportConfig.normalizeTargetLufs,
+    playhead,
+    isPlaying,
+    masterMuted,
+    clarityMode,
+    theme,
+  ]);
+
+  // Listen for transport & control commands from the detached preview window
+  useEffect(() => {
+    const unsub = subscribeDualChannel({
+      onCommand: (cmd) => {
+        if (cmd.type === 'REQUEST_STATE') {
+          pushDualDisplaySnapshot(true);
+        } else if (cmd.type === 'TOGGLE_PLAY') {
+          setIsPlaying((prev) => {
+            if (!prev && playhead >= totalDurationRef.current && totalDurationRef.current > 0) {
+              setPlayhead(0);
+            }
+            return !prev;
+          });
+        } else if (cmd.type === 'SEEK') {
+          setIsPlaying(false);
+          setPlayhead(Math.max(0, Math.min(totalDurationRef.current || 9999, cmd.playhead)));
+        } else if (cmd.type === 'TOGGLE_MUTE') {
+          setMasterMuted((m) => !m);
+        } else if (cmd.type === 'SET_CLARITY') {
+          setClarityMode(cmd.clarityMode);
+        } else if (cmd.type === 'REDOCK' || cmd.type === 'WINDOW_CLOSED') {
+          detachedWinRef.current = null;
+          setIsPreviewDetached(false);
+        }
+      },
+    });
+    return unsub;
+  }, [playhead, tracks, clips, assets, colorGrade, bypassGrade, exportConfig, isPlaying, masterMuted, clarityMode, theme]);
+
+  // Automatically re-dock if the external preview OS window is closed directly
+  useEffect(() => {
+    if (!isPreviewDetached) return;
+    const poll = window.setInterval(() => {
+      if (detachedWinRef.current && detachedWinRef.current.closed) {
+        detachedWinRef.current = null;
+        setIsPreviewDetached(false);
+        notify('Preview re-docked into main workspace');
+      }
+    }, 1000);
+    return () => window.clearInterval(poll);
+  }, [isPreviewDetached]);
+
+  const handleDetachPreview = async () => {
+    const detected = await detectExtendedScreens();
+    setExtendedScreens(detected.screens);
+    const secondary = detected.screens.find((s) => !s.isPrimary) || detected.screens[0];
+    const popupRes = openDetachedPreviewPopup(secondary);
+    if (popupRes.blocked || !popupRes.win) {
+      setErrorBanner(
+        'Pop-up window blocked by browser. Allow pop-ups for this site to separate Preview onto your extended monitor.',
+      );
+      return;
+    }
+    detachedWinRef.current = popupRes.win;
+    setIsPreviewDetached(true);
+    if (detected.screens.length > 1 || isExtendedScreenDetected) {
+      setClarityMode('ultra');
+    }
+    pushDualDisplaySnapshot(true);
+    window.setTimeout(() => pushDualDisplaySnapshot(true), 450);
+    notify(
+      detected.screens.length > 1
+        ? `Preview separated onto ${secondary?.label || 'Extended Display'} (Ultra clarity)`
+        : 'Preview separated into external window — workspace expanded',
+    );
+  };
+
+  const handleRedockPreview = () => {
+    try {
+      if (detachedWinRef.current && !detachedWinRef.current.closed) {
+        detachedWinRef.current.close();
+      }
+    } catch {
+      // ignore close restriction
+    }
+    detachedWinRef.current = null;
+    setIsPreviewDetached(false);
+    notify('Preview docked back inside workspace');
+  };
 
   // Load persisted workspace media on mount
   useEffect(() => {
@@ -1019,15 +1193,40 @@ export default function App() {
     setErrorBanner(null);
     autoDownloadedJobRef.current = null;
 
-    // Pre-render crisp alpha PNGs for any vector title / scrolling credits clips at export resolution
+    // Pre-render crisp alpha PNGs (static) or adaptive ffconcat frame sequences (animated & morphed titles)
     const [expW, expH] = cfgToRender.resolution.split('x').map(Number);
     const preparedClips = clipsToRender.map((c) => {
       if (c.kind === 'title' && c.title) {
-        const rendered = renderTitleToExportPng(c.title, expW, expH);
+        // Keep animated title sequence memory compact at 1920px max edge while FFmpeg scales smoothly
+        const maxEdge = Math.max(expW, expH);
+        const seqScale = maxEdge > 1920 ? 1920 / maxEdge : 1;
+        const seqW = Math.max(2, Math.round((expW * seqScale) / 2) * 2);
+        const seqH = Math.max(2, Math.round((expH * seqScale) / 2) * 2);
+        const rendered = renderTitleExportAssets(
+          c.title,
+          seqW,
+          seqH,
+          c.duration,
+          cfgToRender.fps,
+        );
+        if (rendered.mode === 'frames') {
+          return {
+            ...c,
+            renderedOverlayFrames: rendered.frames,
+            renderedOverlayPng: undefined,
+            renderedOverlayHeight: seqH,
+          };
+        }
+        const singleFull = seqScale < 1
+          ? renderTitleExportAssets(c.title, expW, expH, c.duration, cfgToRender.fps)
+          : rendered;
+        const pngData = singleFull.mode === 'single' ? singleFull.dataUrl : rendered.dataUrl;
+        const outH = singleFull.mode === 'single' ? singleFull.outHeight : rendered.outHeight;
         return {
           ...c,
-          renderedOverlayPng: rendered.dataUrl,
-          renderedOverlayHeight: rendered.outHeight,
+          renderedOverlayPng: pngData,
+          renderedOverlayHeight: outH,
+          renderedOverlayFrames: undefined,
         };
       }
       return c;
@@ -1396,6 +1595,34 @@ export default function App() {
               </span>
             </div>
           )}
+          {isPreviewDetached && (
+            <div className="px-3.5 py-2 bg-blue-50 dark:bg-[#111927] border border-blue-200 dark:border-blue-800/50 rounded-lg text-xs flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-blue-900 dark:text-blue-200">
+                <MonitorCheck className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span className="font-medium">
+                  Dual-Screen Mode: Preview separated into external monitor window ({clarityMode.toUpperCase()} clarity)
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => detachedWinRef.current?.focus()}
+                  className="px-2.5 py-1 rounded bg-white dark:bg-[#18202c] border border-blue-200 dark:border-[#2c384e] text-slate-800 dark:text-slate-100 hover:border-blue-400 font-medium flex items-center gap-1 cursor-pointer"
+                >
+                  <Monitor className="w-3 h-3 text-blue-500" />
+                  <span>Focus Monitor</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRedockPreview}
+                  className="px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white font-medium flex items-center gap-1 cursor-pointer"
+                >
+                  <PanelRightOpen className="w-3 h-3" />
+                  <span>Re-dock Preview</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Center Studio Area */}
@@ -1418,6 +1645,7 @@ export default function App() {
               onUpdateClip={handleUpdateClip}
               onCommitHistory={commitHistory}
               onInsertBakedOverlay={handleInsertBakedOverlay}
+              onAddTitleClip={addTitleClip}
             />
           ) : advancedTab === 'fairlight' ? (
             <FairlightAudioStudio
@@ -1483,7 +1711,11 @@ export default function App() {
             />
           ) : (
             <div className="flex flex-col lg:flex-row gap-3.5 min-h-[380px] lg:h-[445px]">
-              <div className="w-full lg:w-[340px] shrink-0 bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg overflow-hidden flex flex-col">
+              <div
+                className={`w-full shrink-0 bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg overflow-hidden flex flex-col ${
+                  isPreviewDetached ? 'lg:flex-1 min-w-0' : 'lg:w-[340px]'
+                }`}
+              >
                 <TransitionLibraryPanel
                   selectedTransition={
                     selectedClip && (selectedClip.kind === 'image' || selectedClip.kind === 'video')
@@ -1500,43 +1732,52 @@ export default function App() {
                   onApplyTransitionToAll={handleApplyTransitionToAll}
                 />
               </div>
-              <div className="flex-1 min-w-0 min-h-[280px]">
-                <PreviewCanvas
-                  tracks={tracks}
-                  clips={clips}
-                  assetsMap={assetsMap}
-                  selectedClipId={selectedClipId}
-                  canvasTool={canvasTool}
-                  colorGrade={colorGrade}
-                  bypassGrade={bypassGrade}
-                  resolution={exportConfig.resolution}
-                  fps={exportConfig.fps}
-                  playhead={playhead}
-                  isPlaying={isPlaying}
-                  masterMuted={masterMuted}
-                  normalizeAudio={Boolean(exportConfig.normalizeAudio)}
-                  normalizeTargetLufs={exportConfig.normalizeTargetLufs ?? -14}
-                  loadingSample={loadingSample}
-                  uploading={uploading}
-                  onPlayheadChange={setPlayhead}
-                  onSelectClip={(id) => {
-                    setSelectedClipId(id);
-                    if (id) setGradeTargetAssetId(null);
-                  }}
-                  onUpdateClip={handleUpdateClip}
-                  onCommitHistory={commitHistory}
-                  onCanvasToolChange={setCanvasTool}
-                  onTogglePlay={() => {
-                    if (!isPlaying && playhead >= totalDuration && totalDuration > 0) {
-                      setPlayhead(0);
-                    }
-                    setIsPlaying((p) => !p);
-                  }}
-                  onToggleMute={() => setMasterMuted((m) => !m)}
-                  onLoadSamplePack={handleLoadSamplePack}
-                  onUploadFiles={handleUploadFiles}
-                />
-              </div>
+              {!isPreviewDetached && (
+                <div className="flex-1 min-w-0 min-h-[280px]">
+                  <PreviewCanvas
+                    tracks={tracks}
+                    clips={clips}
+                    assetsMap={assetsMap}
+                    selectedClipId={selectedClipId}
+                    canvasTool={canvasTool}
+                    colorGrade={colorGrade}
+                    bypassGrade={bypassGrade}
+                    resolution={exportConfig.resolution}
+                    fps={exportConfig.fps}
+                    playhead={playhead}
+                    isPlaying={isPlaying}
+                    masterMuted={masterMuted}
+                    normalizeAudio={Boolean(exportConfig.normalizeAudio)}
+                    normalizeTargetLufs={exportConfig.normalizeTargetLufs ?? -14}
+                    loadingSample={loadingSample}
+                    uploading={uploading}
+                    clarityMode={clarityMode}
+                    extendedScreenCount={Math.max(
+                      extendedScreens.length,
+                      isExtendedScreenDetected ? 2 : 1,
+                    )}
+                    onClarityModeChange={setClarityMode}
+                    onDetachPreview={handleDetachPreview}
+                    onPlayheadChange={setPlayhead}
+                    onSelectClip={(id) => {
+                      setSelectedClipId(id);
+                      if (id) setGradeTargetAssetId(null);
+                    }}
+                    onUpdateClip={handleUpdateClip}
+                    onCommitHistory={commitHistory}
+                    onCanvasToolChange={setCanvasTool}
+                    onTogglePlay={() => {
+                      if (!isPlaying && playhead >= totalDuration && totalDuration > 0) {
+                        setPlayhead(0);
+                      }
+                      setIsPlaying((p) => !p);
+                    }}
+                    onToggleMute={() => setMasterMuted((m) => !m)}
+                    onLoadSamplePack={handleLoadSamplePack}
+                    onUploadFiles={handleUploadFiles}
+                  />
+                </div>
+              )}
             </div>
           )
         ) : mode === 'quickrender' ? (
@@ -1556,6 +1797,14 @@ export default function App() {
             renderJob={renderJob}
             loadingSample={loadingSample}
             uploading={uploading}
+            clarityMode={clarityMode}
+            isPreviewDetached={isPreviewDetached}
+            extendedScreenCount={Math.max(
+              extendedScreens.length,
+              isExtendedScreenDetected ? 2 : 1,
+            )}
+            onClarityModeChange={setClarityMode}
+            onDetachPreview={handleDetachPreview}
             onChangeConfig={setExportConfig}
             onStartRender={handleStartRender}
             onTogglePlay={() => {
@@ -1591,6 +1840,7 @@ export default function App() {
             selectedGradeAssetId={gradeTargetAssetId}
             selectedClip={selectedClip}
             visualClipCount={clips.filter((c) => c.kind === 'image' || c.kind === 'video').length}
+            expandedLayout={isPreviewDetached}
             onUploadFiles={handleUploadFiles}
             onLoadSamplePack={handleLoadSamplePack}
             onAddVisualToTimeline={addVisualToTimeline}
@@ -1602,43 +1852,52 @@ export default function App() {
             onDeleteAsset={handleDeleteAsset}
           />
 
-          <div className="flex-1 min-w-0 min-h-[280px]">
-            <PreviewCanvas
-              tracks={tracks}
-              clips={clips}
-              assetsMap={assetsMap}
-              selectedClipId={selectedClipId}
-              canvasTool={canvasTool}
-              colorGrade={colorGrade}
-              bypassGrade={bypassGrade}
-              resolution={exportConfig.resolution}
-              fps={exportConfig.fps}
-              playhead={playhead}
-              isPlaying={isPlaying}
-              masterMuted={masterMuted}
-              normalizeAudio={Boolean(exportConfig.normalizeAudio)}
-              normalizeTargetLufs={exportConfig.normalizeTargetLufs ?? -14}
-              loadingSample={loadingSample}
-              uploading={uploading}
-              onPlayheadChange={setPlayhead}
-              onSelectClip={(id) => {
-                setSelectedClipId(id);
-                if (id) setGradeTargetAssetId(null);
-              }}
-              onUpdateClip={handleUpdateClip}
-              onCommitHistory={commitHistory}
-              onCanvasToolChange={setCanvasTool}
-              onTogglePlay={() => {
-                if (!isPlaying && playhead >= totalDuration && totalDuration > 0) {
-                  setPlayhead(0);
-                }
-                setIsPlaying((p) => !p);
-              }}
-              onToggleMute={() => setMasterMuted((m) => !m)}
-              onLoadSamplePack={handleLoadSamplePack}
-              onUploadFiles={handleUploadFiles}
-            />
-          </div>
+          {!isPreviewDetached && (
+            <div className="flex-1 min-w-0 min-h-[280px]">
+              <PreviewCanvas
+                tracks={tracks}
+                clips={clips}
+                assetsMap={assetsMap}
+                selectedClipId={selectedClipId}
+                canvasTool={canvasTool}
+                colorGrade={colorGrade}
+                bypassGrade={bypassGrade}
+                resolution={exportConfig.resolution}
+                fps={exportConfig.fps}
+                playhead={playhead}
+                isPlaying={isPlaying}
+                masterMuted={masterMuted}
+                normalizeAudio={Boolean(exportConfig.normalizeAudio)}
+                normalizeTargetLufs={exportConfig.normalizeTargetLufs ?? -14}
+                loadingSample={loadingSample}
+                uploading={uploading}
+                clarityMode={clarityMode}
+                extendedScreenCount={Math.max(
+                  extendedScreens.length,
+                  isExtendedScreenDetected ? 2 : 1,
+                )}
+                onClarityModeChange={setClarityMode}
+                onDetachPreview={handleDetachPreview}
+                onPlayheadChange={setPlayhead}
+                onSelectClip={(id) => {
+                  setSelectedClipId(id);
+                  if (id) setGradeTargetAssetId(null);
+                }}
+                onUpdateClip={handleUpdateClip}
+                onCommitHistory={commitHistory}
+                onCanvasToolChange={setCanvasTool}
+                onTogglePlay={() => {
+                  if (!isPlaying && playhead >= totalDuration && totalDuration > 0) {
+                    setPlayhead(0);
+                  }
+                  setIsPlaying((p) => !p);
+                }}
+                onToggleMute={() => setMasterMuted((m) => !m)}
+                onLoadSamplePack={handleLoadSamplePack}
+                onUploadFiles={handleUploadFiles}
+              />
+            </div>
+          )}
 
           <ClipInspectorPanel
             selectedClip={selectedClip}
@@ -1650,6 +1909,7 @@ export default function App() {
             canvasTool={canvasTool}
             colorGrade={colorGrade}
             bypassGrade={bypassGrade}
+            expandedLayout={isPreviewDetached}
             onTabChange={setInspectorTab}
             onGradeScopeChange={setGradeScope}
             onCanvasToolChange={setCanvasTool}

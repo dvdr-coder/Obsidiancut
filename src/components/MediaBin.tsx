@@ -37,6 +37,7 @@ interface MediaBinProps {
   selectedGradeAssetId?: string | null;
   selectedClip?: TimelineClip | null;
   visualClipCount?: number;
+  expandedLayout?: boolean;
   onUploadFiles: (files: FileList | File[]) => void;
   onLoadSamplePack: () => void;
   onAddVisualToTimeline: (asset: MediaAsset, asOverlay?: boolean) => void;
@@ -145,6 +146,7 @@ export const MediaBin: React.FC<MediaBinProps> = ({
   selectedGradeAssetId,
   selectedClip = null,
   visualClipCount = 0,
+  expandedLayout = false,
   onUploadFiles,
   onLoadSamplePack,
   onAddVisualToTimeline,
@@ -210,7 +212,11 @@ export const MediaBin: React.FC<MediaBinProps> = ({
     SUPPORTED_FORMAT_GROUPS.audio.length;
 
   return (
-    <aside className="w-full lg:w-[312px] shrink-0 flex flex-col bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg overflow-hidden shadow-xs dark:shadow-none">
+    <aside
+      className={`w-full shrink-0 flex flex-col bg-white dark:bg-[#14171d] border border-slate-200 dark:border-[#232832] rounded-lg overflow-hidden shadow-xs dark:shadow-none ${
+        expandedLayout ? 'lg:flex-1 min-w-0' : 'lg:w-[312px]'
+      }`}
+    >
       {/* Tabs: Media Assets | Transitions | Titles & Credits */}
       <div className="flex border-b border-slate-200 dark:border-[#232832] bg-slate-50 dark:bg-[#171b22] shrink-0">
         <button
@@ -286,6 +292,57 @@ export const MediaBin: React.FC<MediaBinProps> = ({
                 </button>
               ))}
             </div>
+            {draftTemplate !== 'scrolling_credits' && (
+              <div className="grid grid-cols-3 gap-1 pt-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDraftSpec((prev) => ({
+                      ...prev,
+                      fontFamily: 'Syne',
+                      animation: 'tracking_expand',
+                      morphAnimation: 'none',
+                      textTransform: 'uppercase',
+                      animOut: true,
+                    }))
+                  }
+                  className="px-2 py-1 rounded text-[10px] font-medium bg-slate-100 dark:bg-[#101318] border border-slate-200 dark:border-[#232832] hover:border-blue-500 text-slate-700 dark:text-slate-300 cursor-pointer"
+                >
+                  Cinema Rise
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDraftSpec((prev) => ({
+                      ...prev,
+                      fontFamily: 'Bebas Neue',
+                      animation: 'fade_rise',
+                      morphAnimation: 'liquid_dissolve',
+                      morphTargetText: prev.subheading || 'STORY BEGINS',
+                      gradientEnabled: true,
+                      gradientColor: '#38bdf8',
+                    }))
+                  }
+                  className="px-2 py-1 rounded text-[10px] font-medium bg-slate-100 dark:bg-[#101318] border border-slate-200 dark:border-[#232832] hover:border-blue-500 text-slate-700 dark:text-slate-300 cursor-pointer"
+                >
+                  Liquid Morph
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setDraftSpec((prev) => ({
+                      ...prev,
+                      fontFamily: 'JetBrains Mono',
+                      animation: 'typewriter',
+                      morphAnimation: 'none',
+                    }))
+                  }
+                  className="px-2 py-1 rounded text-[10px] font-medium bg-slate-100 dark:bg-[#101318] border border-slate-200 dark:border-[#232832] hover:border-blue-500 text-slate-700 dark:text-slate-300 cursor-pointer"
+                >
+                  Typewriter
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-[#232832]">

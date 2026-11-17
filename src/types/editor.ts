@@ -76,33 +76,91 @@ export type TitleFontFamily =
   | 'Outfit'
   | 'Public Sans'
   | 'Montserrat'
+  | 'Plus Jakarta Sans'
+  | 'DM Sans'
+  | 'Urbanist'
+  | 'Arial'
+  | 'Syne'
+  | 'Bricolage Grotesque'
   | 'Bebas Neue'
+  | 'Anton'
   | 'Oswald'
+  | 'Barlow Condensed'
+  | 'Righteous'
   | 'Playfair Display'
+  | 'Cinzel'
+  | 'Cormorant Garamond'
   | 'Lora'
   | 'Georgia'
-  | 'Arial'
+  | 'Caveat'
+  | 'Dancing Script'
+  | 'Pacifico'
   | 'JetBrains Mono'
+  | 'IBM Plex Mono'
   | 'Courier New';
 
 export const TITLE_FONT_OPTIONS: {
   value: TitleFontFamily;
   label: string;
-  category: 'Sans' | 'Display' | 'Serif' | 'Mono';
-  fallback: 'sans-serif' | 'serif' | 'monospace';
+  category: 'Display' | 'Sans' | 'Serif' | 'Script' | 'Mono';
+  fallback: 'sans-serif' | 'serif' | 'cursive' | 'monospace';
 }[] = [
-  { value: 'Outfit', label: 'Outfit (Modern Sans)', category: 'Sans', fallback: 'sans-serif' },
-  { value: 'Public Sans', label: 'Public Sans (Clean UI)', category: 'Sans', fallback: 'sans-serif' },
-  { value: 'Montserrat', label: 'Montserrat (Geometric)', category: 'Sans', fallback: 'sans-serif' },
-  { value: 'Arial', label: 'Arial (Classic Sans)', category: 'Sans', fallback: 'sans-serif' },
+  { value: 'Syne', label: 'Syne (Avant-Garde Display)', category: 'Display', fallback: 'sans-serif' },
+  { value: 'Bricolage Grotesque', label: 'Bricolage Grotesque (Expressive)', category: 'Display', fallback: 'sans-serif' },
   { value: 'Bebas Neue', label: 'Bebas Neue (Cinema Poster)', category: 'Display', fallback: 'sans-serif' },
-  { value: 'Oswald', label: 'Oswald (Condensed)', category: 'Display', fallback: 'sans-serif' },
-  { value: 'Playfair Display', label: 'Playfair Display (Editorial Serif)', category: 'Serif', fallback: 'serif' },
-  { value: 'Lora', label: 'Lora (Warm Serif)', category: 'Serif', fallback: 'serif' },
+  { value: 'Anton', label: 'Anton (Heavy Impact)', category: 'Display', fallback: 'sans-serif' },
+  { value: 'Oswald', label: 'Oswald (Tall Condensed)', category: 'Display', fallback: 'sans-serif' },
+  { value: 'Barlow Condensed', label: 'Barlow Condensed (Trailer)', category: 'Display', fallback: 'sans-serif' },
+  { value: 'Righteous', label: 'Righteous (Retro Geo)', category: 'Display', fallback: 'sans-serif' },
+  { value: 'Outfit', label: 'Outfit (Modern Sans)', category: 'Sans', fallback: 'sans-serif' },
+  { value: 'Plus Jakarta Sans', label: 'Plus Jakarta Sans (Studio Clean)', category: 'Sans', fallback: 'sans-serif' },
+  { value: 'Montserrat', label: 'Montserrat (Geometric Bold)', category: 'Sans', fallback: 'sans-serif' },
+  { value: 'DM Sans', label: 'DM Sans (Editorial UI)', category: 'Sans', fallback: 'sans-serif' },
+  { value: 'Urbanist', label: 'Urbanist (Minimalist Sleek)', category: 'Sans', fallback: 'sans-serif' },
+  { value: 'Public Sans', label: 'Public Sans (Broadcast Clean)', category: 'Sans', fallback: 'sans-serif' },
+  { value: 'Arial', label: 'Arial (Classic System)', category: 'Sans', fallback: 'sans-serif' },
+  { value: 'Playfair Display', label: 'Playfair Display (Editorial)', category: 'Serif', fallback: 'serif' },
+  { value: 'Cinzel', label: 'Cinzel (Epic Engraved)', category: 'Serif', fallback: 'serif' },
+  { value: 'Cormorant Garamond', label: 'Cormorant Garamond (Luxury)', category: 'Serif', fallback: 'serif' },
+  { value: 'Lora', label: 'Lora (Warm Narrative)', category: 'Serif', fallback: 'serif' },
   { value: 'Georgia', label: 'Georgia (Classic Serif)', category: 'Serif', fallback: 'serif' },
+  { value: 'Caveat', label: 'Caveat (Handwritten Marker)', category: 'Script', fallback: 'cursive' },
+  { value: 'Dancing Script', label: 'Dancing Script (Calligraphy)', category: 'Script', fallback: 'cursive' },
+  { value: 'Pacifico', label: 'Pacifico (Brush Script)', category: 'Script', fallback: 'cursive' },
   { value: 'JetBrains Mono', label: 'JetBrains Mono (Technical)', category: 'Mono', fallback: 'monospace' },
+  { value: 'IBM Plex Mono', label: 'IBM Plex Mono (HUD Telemetry)', category: 'Mono', fallback: 'monospace' },
   { value: 'Courier New', label: 'Courier New (Typewriter)', category: 'Mono', fallback: 'monospace' },
 ];
+
+export type TitleTextAnimation =
+  | 'none'
+  | 'fade-in'
+  | 'slide-up'
+  | 'pop-in'
+  | 'fade_rise'
+  | 'slide_left'
+  | 'slide_right'
+  | 'zoom_punch'
+  | 'tracking_expand'
+  | 'typewriter'
+  | 'word_stagger'
+  | 'blur_focus'
+  | 'wave_bounce'
+  | 'wipe_reveal'
+  | 'glitch_flicker';
+
+export type TitleMotionEasing = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'spring';
+
+export type TitleMorphAnimation =
+  | 'none'
+  | 'text_morph'
+  | 'liquid_dissolve'
+  | 'weight_scale_morph'
+  | 'capsule_expand'
+  | 'split_converge'
+  | 'ribbon_unfold';
+
+export type TitleTransformCase = 'none' | 'uppercase' | 'lowercase' | 'capitalize';
 
 export interface TitleSpec {
   template: TitleTemplateId;
@@ -115,6 +173,29 @@ export interface TitleSpec {
   fontFamily: TitleFontFamily | string;
   fontSize: number; // 0.6 to 2.0
   align: 'left' | 'center' | 'right';
+  // Rich typography & style properties (optional for backwards project compatibility)
+  fontWeight?: number; // 400..900
+  italic?: boolean;
+  textTransform?: TitleTransformCase;
+  letterSpacing?: number; // -4..24 px (1280p base)
+  lineHeight?: number; // 0.9..2.0
+  strokeColor?: string;
+  strokeWidth?: number; // 0..10 px
+  shadowBlur?: number; // 0..40 px
+  shadowColor?: string;
+  gradientEnabled?: boolean;
+  gradientColor?: string;
+  pillBgColor?: string; // 'transparent' or hex
+  pillPadding?: number; // 0..36 px
+  offsetY?: number; // -35..35 % vertical nudge
+  // Kinetic text & morph animations
+  animation?: TitleTextAnimation;
+  animDurationSec?: number; // 0.2..3.0s
+  animEasing?: TitleMotionEasing;
+  animOut?: boolean;
+  morphAnimation?: TitleMorphAnimation;
+  morphTargetText?: string;
+  morphPeakPct?: number; // 0.25..0.85
 }
 
 export interface ClipEffects {
@@ -260,6 +341,7 @@ export interface TimelineClip {
   title?: TitleSpec;
   renderedOverlayPng?: string;
   renderedOverlayHeight?: number;
+  renderedOverlayFrames?: { png: string; duration: number }[];
 }
 
 export type ParticlePresetId = 'none' | 'embers' | 'snow' | 'stardust' | 'sparks';
@@ -333,6 +415,20 @@ export interface ColorGradeConfig {
 }
 
 export type ExportFps = 23.976 | 24 | 29.97 | 30 | 59.94 | 60;
+
+export type PreviewClarityMode = 'standard' | 'hd' | 'ultra';
+
+export interface ScreenMonitorInfo {
+  id: string;
+  label: string;
+  isPrimary: boolean;
+  isInternal: boolean;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  devicePixelRatio: number;
+}
 
 export interface ExportConfig {
   resolution: '1280x720' | '1920x1080' | '3840x2160' | '1080x1920' | '1080x1080';
